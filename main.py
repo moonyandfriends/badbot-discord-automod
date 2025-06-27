@@ -11,6 +11,7 @@ import logging
 import os
 from typing import Dict, List, Optional, Set
 from dataclasses import dataclass
+from datetime import datetime
 
 import nextcord
 from nextcord.ext import commands
@@ -29,7 +30,6 @@ class ServerConfig:
     """Configuration for a Discord server."""
     guild_id: int
     guild_name: str
-    log_channel_id: int
 
 @dataclass
 class WebhookConfig:
@@ -56,30 +56,28 @@ class BadBotAutoMod:
                 logger.error("Environment variable 'badbot_automod_servers' not found")
                 raise ValueError("badbot_automod_servers environment variable is required")
                 
-            # Parse servers in format: guildID|guildName|logChannelID,guildID2|guildName2|logChannelID2
+            # Parse servers in format: guildID|guildName,guildID2|guildName2
             server_pairs = servers_env.split(',')
             
             for pair in server_pairs:
                 if '|' in pair:
                     parts = pair.strip().split('|')
-                    if len(parts) == 3:
-                        guild_id_str, guild_name, log_channel_id_str = parts
+                    if len(parts) == 2:
+                        guild_id_str, guild_name = parts
                         try:
                             guild_id = int(guild_id_str.strip())
-                            log_channel_id = int(log_channel_id_str.strip())
                             
                             server_config = ServerConfig(
                                 guild_id=guild_id,
-                                guild_name=guild_name.strip(),
-                                log_channel_id=log_channel_id
+                                guild_name=guild_name.strip()
                             )
                             self.badbot_servers_automod[guild_id] = server_config
-                            logger.info(f"Loaded server: {guild_name} ({guild_id}) with log channel {log_channel_id}")
+                            logger.info(f"Loaded server: {guild_name} ({guild_id})")
                         except ValueError:
-                            logger.warning(f"Invalid server ID or log channel ID format: {pair}")
+                            logger.warning(f"Invalid server ID format: {pair}")
                             continue
                     else:
-                        logger.warning(f"Invalid server format (expected guildID|guildName|logChannelID): {pair}")
+                        logger.warning(f"Invalid server format (expected guildID|guildName): {pair}")
                         continue
                         
             logger.info(f"Loaded {len(self.badbot_servers_automod)} servers from environment")
@@ -407,37 +405,8 @@ class BadBotAutoMod:
                 source_guild_id=guild.id,
                 ban_results=ban_results
             )
-            
-            # Log to the source server's log channel
-            server_config = self.badbot_servers_automod[payload.guild_id]
-            log_channel = self.bot.get_channel(server_config.log_channel_id)
-            
-            if log_channel:
-                embed = nextcord.Embed(
-                    title="🚨 Scammer Banned",
-                    description=f"User {member.mention if member else f'({user_id})'} has been banned from all monitored servers.",
-                    color=0xFF0000
-                )
-                embed.add_field(name="Scam Message", value=f"```{blocked_content}```", inline=False)
-                embed.add_field(name="Ban Results", value=f"Banned from {sum(ban_results.values())}/{len(ban_results)} servers", inline=True)
-                
-                await log_channel.send(embed=embed)
         else:
             logger.info(f"GPT-4 determined message from {username} ({user_id}) is not a scam")
-            
-            # Log non-scam to the source server's log channel
-            server_config = self.badbot_servers_automod[payload.guild_id]
-            log_channel = self.bot.get_channel(server_config.log_channel_id)
-            
-            if log_channel:
-                embed = nextcord.Embed(
-                    title="✅ Message Analyzed",
-                    description=f"Message from {member.mention if member else f'({user_id})'} was flagged by AutoMod but determined to be safe.",
-                    color=0x00FF00
-                )
-                embed.add_field(name="Message Content", value=f"```{blocked_content}```", inline=False)
-                
-                await log_channel.send(embed=embed)
     
     def create_bot(self, token: str) -> commands.Bot:
         """
