@@ -289,17 +289,17 @@ class BadBotAutoMod:
         # Create embed message
         embed_data = {
             "title": "🔨 Scammer Banned",
-            "description": f"User: {username} ({user_id})",
+            "description": f"**User:** <@{user_id}> ({user_id})",
             "color": 0xFF0000,  # Red color
             "fields": [
                 {
-                    "name": "Source Server",
-                    "value": f"Source Server: {source_guild_name}",
+                    "name": "**Source Server:**",
+                    "value": f"**{source_guild_name}**",
                     "inline": True
                 },
                 {
-                    "name": "Scam Message",
-                    "value": f"Scam Message: ```{message_content[:1000]}```",
+                    "name": "**Scam Message:**",
+                    "value": f"```{message_content[:1000]}```",
                     "inline": False
                 }
             ],
