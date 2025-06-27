@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Discord AutoMod Bot for Railway - Improved Version
+Discord AutoMod Bot for Railway - Improved Version with Rate Limiting
 Monitors AutoMod events, uses ChatGPT to detect scams, bans users across all servers, and sends webhook notifications.
 """
 
@@ -9,9 +9,13 @@ import asyncio
 import logging
 import aiohttp
 import re
-from typing import Dict, List, Set
+import time
+import signal
+from typing import Dict, List, Set, Optional
 from dataclasses import dataclass
 from urllib.parse import urlparse
+from collections import deque
+import backoff
 
 import nextcord
 from nextcord.ext import commands
@@ -27,6 +31,32 @@ class ServerConfig:
     guild_id: int
     guild_name: str
 
+class RateLimiter:
+    """Rate limiter for API calls."""
+    
+    def __init__(self, max_calls: int, time_window: float):
+        self.max_calls = max_calls
+        self.time_window = time_window
+        self.calls = deque()
+    
+    async def acquire(self):
+        """Acquire permission to make an API call."""
+        now = time.time()
+        
+        # Remove old calls outside the time window
+        while self.calls and now - self.calls[0] > self.time_window:
+            self.calls.popleft()
+        
+        # If we've made too many calls, wait
+        if len(self.calls) >= self.max_calls:
+            wait_time = self.time_window - (now - self.calls[0])
+            if wait_time > 0:
+                logger.info(f"Rate limit reached, waiting {wait_time:.2f} seconds")
+                await asyncio.sleep(wait_time)
+        
+        # Add current call
+        self.calls.append(now)
+
 class BadBotAutoMod:
     """Discord AutoMod bot that detects scams and bans users across multiple servers."""
     
@@ -35,8 +65,19 @@ class BadBotAutoMod:
         self.servers: Dict[int, ServerConfig] = {}
         self.webhook_urls: List[str] = []
         self.openai_client = None
-        self.processed_users: Set[int] = set()  # Prevent duplicate processing
+        self.processed_users: deque = deque(maxlen=1000)  # Prevent memory leaks
         self.openai_model = "gpt-4o-mini"  # Default model
+        
+        # Rate limiters
+        self.discord_rate_limiter = RateLimiter(max_calls=50, time_window=60)  # 50 calls per minute
+        self.openai_rate_limiter = RateLimiter(max_calls=10, time_window=60)   # 10 calls per minute
+        self.webhook_rate_limiter = RateLimiter(max_calls=30, time_window=60)  # 30 calls per minute
+        
+        # Connection pooling
+        self.session: Optional[aiohttp.ClientSession] = None
+        
+        # Graceful shutdown
+        self.shutdown_event = asyncio.Event()
         
     def validate_webhook_url(self, url: str) -> bool:
         """Validate that a webhook URL is properly formatted."""
@@ -172,9 +213,17 @@ class BadBotAutoMod:
         logger.info("Credentials loaded successfully")
         
         return discord_token
-        
+
+    @backoff.on_exception(backoff.expo, (openai.RateLimitError, openai.APIError), max_tries=3)
     async def check_gpt_for_scam(self, content: str) -> bool:
-        """Check if content is a scam using ChatGPT."""
+        """Check if content is a scam using ChatGPT with retry logic."""
+        # Rate limit check
+        await self.openai_rate_limiter.acquire()
+        
+        if not self.openai_client:
+            logger.error("OpenAI client not initialized")
+            return False
+        
         system_prompt = (
             "You are a strict content evaluator focusing on scam detection. "
             "Not all external links are suspicious; however, messages containing "
@@ -220,19 +269,26 @@ class BadBotAutoMod:
             
         except openai.RateLimitError:
             logger.error("OpenAI rate limit exceeded")
-            return False
+            raise  # Let backoff handle retry
         except openai.APIError as e:
             logger.error(f"OpenAI API error: {e}")
-            return False
+            raise  # Let backoff handle retry
         except Exception as e:
             logger.error(f"Error checking content with ChatGPT: {e}")
             return False
             
     async def ban_user_from_all_servers(self, user_id: int, reason: str) -> Dict[int, bool]:
-        """Ban user from all configured servers with rate limiting."""
+        """Ban user from all configured servers with rate limiting and retry logic."""
         ban_results = {}
         
+        if not self.bot:
+            logger.error("Bot not initialized")
+            return ban_results
+        
         for guild_id, server_config in self.servers.items():
+            # Rate limit check
+            await self.discord_rate_limiter.acquire()
+            
             guild = self.bot.get_guild(guild_id)
             if not guild:
                 logger.warning(f"Could not find guild {server_config.guild_name} ({guild_id})")
@@ -282,10 +338,15 @@ class BadBotAutoMod:
     async def send_webhook_notifications(self, user_id: int, username: str, 
                                        message_content: str, source_guild_name: str,
                                        ban_results: Dict[int, bool]) -> None:
-        """Send notifications to all configured webhooks with timeout."""
-        successful_bans = sum(ban_results.values())
-        total_servers = len(ban_results)
-        
+        """Send notifications to all configured webhooks with connection pooling and rate limiting."""
+        if not self.webhook_urls:
+            logger.info("No webhook URLs configured, skipping notifications")
+            return
+            
+        if not self.session:
+            logger.error("HTTP session not initialized")
+            return
+            
         # Create embed message
         embed_data = {
             "title": "🔨 Scammer Banned",
@@ -306,98 +367,109 @@ class BadBotAutoMod:
             "timestamp": nextcord.utils.utcnow().isoformat()
         }
         
-        # Send to all webhooks with timeout
-        timeout = aiohttp.ClientTimeout(total=10)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            for i, webhook_url in enumerate(self.webhook_urls):
-                try:
-                    webhook_data = {
-                        "username": "BadBot AutoMod",
-                        "embeds": [embed_data]
-                    }
-                    
-                    async with session.post(webhook_url, json=webhook_data) as response:
-                        if response.status == 204:
-                            logger.info(f"Webhook {i+1} notification sent successfully")
-                        else:
-                            logger.warning(f"Webhook {i+1} returned status {response.status}")
-                            
-                    # Rate limiting delay
-                    await asyncio.sleep(1)
-                    
-                except asyncio.TimeoutError:
-                    logger.error(f"Webhook {i+1} request timed out")
-                except Exception as e:
-                    logger.error(f"Failed to send webhook {i+1} notification: {e}")
+        # Send to all webhooks with connection pooling
+        for i, webhook_url in enumerate(self.webhook_urls):
+            # Rate limit check
+            await self.webhook_rate_limiter.acquire()
+            
+            try:
+                webhook_data = {
+                    "username": "BadBot AutoMod",
+                    "embeds": [embed_data]
+                }
+                
+                async with self.session.post(webhook_url, json=webhook_data, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                    if response.status == 204:
+                        logger.info(f"Webhook {i+1} notification sent successfully")
+                    else:
+                        logger.warning(f"Webhook {i+1} returned status {response.status}")
+                        
+                # Rate limiting delay
+                await asyncio.sleep(1)
+                
+            except asyncio.TimeoutError:
+                logger.error(f"Webhook {i+1} request timed out")
+            except Exception as e:
+                logger.error(f"Failed to send webhook {i+1} notification: {e}")
                     
     async def handle_automod_event(self, payload: nextcord.AutoModerationActionExecution) -> None:
-        """Handle AutoMod action execution events."""
-        logger.info(f"Received AutoMod event from guild {payload.guild_id}")
-        
-        # Only process message blocks
-        if payload.action.type != nextcord.AutoModerationActionType.block_message:
-            logger.info("Action is not block_message, ignoring")
-            return
+        """Handle AutoMod action execution events with error recovery."""
+        try:
+            logger.info(f"Received AutoMod event from guild {payload.guild_id}")
             
-        # Check if this is from one of our monitored servers
-        guild_id = payload.guild_id
-        if guild_id not in self.servers:
-            logger.info(f"Event from unmonitored server {guild_id}, ignoring")
-            return
+            # Only process message blocks
+            if payload.action.type != nextcord.AutoModerationActionType.block_message:
+                logger.info("Action is not block_message, ignoring")
+                return
+                
+            # Check if this is from one of our monitored servers
+            guild_id = payload.guild_id
+            if guild_id not in self.servers:
+                logger.info(f"Event from unmonitored server {guild_id}, ignoring")
+                return
+                
+            # Get user ID and check for duplicates
+            user_id = payload.member_id
+            if not user_id:
+                logger.warning("No user ID in AutoMod payload")
+                return
+                
+            if user_id in self.processed_users:
+                logger.info(f"User {user_id} already processed recently, skipping")
+                return
+                
+            server_config = self.servers[guild_id]
             
-        # Get user ID and check for duplicates
-        user_id = payload.member_id
-        if not user_id:
-            logger.warning("No user ID in AutoMod payload")
-            return
+            if not self.bot:
+                logger.error("Bot not initialized")
+                return
+                
+            guild = self.bot.get_guild(guild_id)
             
-        if user_id in self.processed_users:
-            logger.info(f"User {user_id} already processed recently, skipping")
-            return
+            if not guild:
+                logger.warning(f"Could not find guild {guild_id}")
+                return
+                
+            logger.info(f"Processing AutoMod event from {server_config.guild_name}")
             
-        server_config = self.servers[guild_id]
-        guild = self.bot.get_guild(guild_id)
-        
-        if not guild:
-            logger.warning(f"Could not find guild {guild_id}")
-            return
+            # Get user information
+            member = guild.get_member(user_id) if user_id else None
+            username = member.display_name if member else f"Unknown User ({user_id})"
             
-        logger.info(f"Processing AutoMod event from {server_config.guild_name}")
-        
-        # Get user information
-        member = guild.get_member(user_id) if user_id else None
-        username = member.display_name if member else f"Unknown User ({user_id})"
-        
-        # Get blocked content
-        blocked_content = payload.content or payload.matched_keyword or ""
-        if not blocked_content.strip():
-            logger.info("No content to analyze, skipping")
-            return
+            # Get blocked content
+            blocked_content = payload.content or payload.matched_keyword or ""
+            if not blocked_content.strip():
+                logger.info("No content to analyze, skipping")
+                return
+                
+            logger.info(f"Analyzing content from {username}: {blocked_content[:100]}...")
             
-        logger.info(f"Analyzing content from {username}: {blocked_content[:100]}...")
-        
-        # Check with ChatGPT
-        is_scam = await self.check_gpt_for_scam(blocked_content)
-        
-        if is_scam:
-            logger.info(f"ChatGPT confirmed scam from {username} ({user_id})")
+            # Check with ChatGPT
+            is_scam = await self.check_gpt_for_scam(blocked_content)
             
-            # Mark user as processed to prevent duplicates
-            self.processed_users.add(user_id)
-            
-            # Ban user from all servers
-            ban_results = await self.ban_user_from_all_servers(user_id, "Scam detected by ChatGPT")
-            
-            # Send webhook notifications
-            await self.send_webhook_notifications(
-                user_id=user_id,
-                username=username,
-                message_content=blocked_content,
-                source_guild_name=guild.name,
-                ban_results=ban_results
-            )
-        else:
-            logger.info(f"ChatGPT determined message from {username} ({user_id}) is not a scam")
+            if is_scam:
+                logger.info(f"ChatGPT confirmed scam from {username} ({user_id})")
+                
+                # Mark user as processed to prevent duplicates
+                self.processed_users.append(user_id)
+                
+                # Ban user from all servers
+                ban_results = await self.ban_user_from_all_servers(user_id, "Scam detected by ChatGPT")
+                
+                # Send webhook notifications
+                await self.send_webhook_notifications(
+                    user_id=user_id,
+                    username=username,
+                    message_content=blocked_content,
+                    source_guild_name=guild.name,
+                    ban_results=ban_results
+                )
+            else:
+                logger.info(f"ChatGPT determined message from {username} ({user_id}) is not a scam")
+                
+        except Exception as e:
+            logger.error(f"Error handling AutoMod event: {e}")
+            # Don't re-raise - continue processing other events
     
     def create_bot(self, token: str) -> commands.Bot:
         """Create and configure the Discord bot."""
@@ -420,11 +492,12 @@ class BadBotAutoMod:
                     logger.info(f"✅ Connected to {guild.name} ({guild_id})")
                     
                     # Check bot permissions
-                    bot_member = guild.get_member(bot.user.id)
-                    if bot_member and bot_member.guild_permissions.ban_members:
-                        logger.info(f"✅ Has ban permissions in {guild.name}")
-                    else:
-                        logger.warning(f"⚠️  Missing ban permissions in {guild.name}")
+                    if bot.user:
+                        bot_member = guild.get_member(bot.user.id)
+                        if bot_member and bot_member.guild_permissions.ban_members:
+                            logger.info(f"✅ Has ban permissions in {guild.name}")
+                        else:
+                            logger.warning(f"⚠️  Missing ban permissions in {guild.name}")
                 else:
                     logger.warning(f"❌ Cannot access server {server_config.guild_name} ({guild_id})")
         
@@ -437,20 +510,70 @@ class BadBotAutoMod:
             logger.error(f"Bot error in event {event}: {args}")
         
         return bot
-    
+
+    async def setup_session(self):
+        """Setup HTTP session with connection pooling."""
+        connector = aiohttp.TCPConnector(
+            limit=100,  # Total connection pool size
+            limit_per_host=30,  # Connections per host
+            ttl_dns_cache=300,  # DNS cache TTL
+            use_dns_cache=True,
+            keepalive_timeout=30,
+            enable_cleanup_closed=True
+        )
+        
+        timeout = aiohttp.ClientTimeout(total=30, connect=10)
+        self.session = aiohttp.ClientSession(
+            connector=connector,
+            timeout=timeout,
+            headers={'User-Agent': 'BadBot-AutoMod/1.0'}
+        )
+        logger.info("HTTP session initialized with connection pooling")
+
+    async def cleanup(self):
+        """Cleanup resources."""
+        logger.info("Cleaning up resources...")
+        if self.session:
+            await self.session.close()
+        if self.bot:
+            await self.bot.close()
+        logger.info("Cleanup completed")
+
+    def signal_handler(self, signum, frame):
+        """Handle shutdown signals."""
+        logger.info(f"Received signal {signum}, initiating graceful shutdown...")
+        self.shutdown_event.set()
+
     async def run(self) -> None:
-        """Run the bot."""
+        """Run the bot with graceful shutdown."""
         try:
+            # Setup signal handlers
+            signal.signal(signal.SIGINT, self.signal_handler)
+            signal.signal(signal.SIGTERM, self.signal_handler)
+            
             # Load configuration
             self.load_config()
             token = self.load_credentials()
             
+            # Setup HTTP session
+            await self.setup_session()
+            
             # Create and run bot
             self.bot = self.create_bot(token)
-            await self.bot.start(token)
+            
+            # Run bot until shutdown signal
+            bot_task = asyncio.create_task(self.bot.start(token))
+            
+            # Wait for shutdown signal
+            await self.shutdown_event.wait()
+            
+            # Graceful shutdown
+            logger.info("Initiating graceful shutdown...")
+            await self.cleanup()
             
         except Exception as e:
             logger.error(f"Failed to start bot: {e}")
+            await self.cleanup()
             raise
 
 async def main():
