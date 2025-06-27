@@ -6,11 +6,13 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application files
+# Copy all application files
 COPY main.py .
 COPY web_main_simple.py .
+COPY startup_debug.py .
+COPY railway_test.py .
 
 EXPOSE 8000
 
-# Run the simplified web server
-CMD ["python", "web_main_simple.py"] 
+# Run the debug script to identify issues
+CMD ["python", "startup_debug.py"] 

@@ -1,0 +1,13 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy test script first
+COPY railway_test.py .
+
+# Run the test script to identify issues
+CMD ["python", "railway_test.py"] 
