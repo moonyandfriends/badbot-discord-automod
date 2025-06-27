@@ -11,6 +11,7 @@ A Discord bot that monitors AutoMod events across multiple servers and uses GPT-
 - **Rate Limiting**: Implements 2-second delays between bans and webhook posts
 - **Comprehensive Logging**: Detailed logging for monitoring and debugging
 - **Duplicate Prevention**: Prevents processing the same user multiple times
+- **Environment-Based Configuration**: Uses environment variables for secure configuration
 
 ## Setup
 
@@ -31,7 +32,7 @@ Your Discord bot needs the following permissions:
 - `Embed Links` - To send rich embed notifications
 - `Read Message History` - To access message content
 
-### 3. Installation
+### 3. Local Installation
 
 1. Clone this repository:
 ```bash
@@ -44,41 +45,79 @@ cd badbot-discord-automod
 pip install -r requirements.txt
 ```
 
-3. Create credential files:
-   - Create `token.txt` with your Discord bot token
-   - Create `openai.txt` with your OpenAI API key
-
-4. Configure the bot:
-   - Edit `config.json` with your server and webhook configurations
-   - Update server IDs, names, and log channel IDs
-   - Add your webhook URLs
-
-### 4. Configuration
-
-Edit `config.json` to configure your servers and webhooks:
-
-```json
-{
-  "servers": [
-    {
-      "guild_id": 123456789012345678,
-      "guild_name": "My Server",
-      "log_channel_id": 987654321098765432
-    }
-  ],
-  "webhooks": [
-    {
-      "url": "https://discord.com/api/webhooks/YOUR_WEBHOOK_URL",
-      "name": "Notification Channel"
-    }
-  ]
-}
+3. Set up environment variables:
+```bash
+export DISCORD_TOKEN="your_discord_bot_token"
+export OPENAI_API_KEY="your_openai_api_key"
+export SERVERS="guildID1:guildName1:logChannelID1,guildID2:guildName2:logChannelID2"
+export WEBHOOK_URLS="webhook1,webhook2,webhook3"
+export OPENAI_MODEL="gpt-4o-mini"
+export OPENAI_TEMP="0.0"
 ```
 
-### 5. Running the Bot
-
+4. Run the bot:
 ```bash
 python main.py
+```
+
+### 4. Railway Deployment
+
+This bot is configured for easy deployment on Railway:
+
+1. **Fork or clone this repository** to your GitHub account
+
+2. **Connect to Railway**:
+   - Go to [Railway.app](https://railway.app)
+   - Create a new project
+   - Choose "Deploy from GitHub repo"
+   - Select this repository
+
+3. **Configure Environment Variables** in Railway:
+   - `DISCORD_TOKEN`: Your Discord bot token
+   - `OPENAI_API_KEY`: Your OpenAI API key
+   - `SERVERS`: Server configuration (see format below)
+   - `WEBHOOK_URLS`: Comma-separated webhook URLs (optional)
+   - `OPENAI_MODEL`: OpenAI model to use (default: gpt-4o-mini)
+   - `OPENAI_TEMP`: Temperature for OpenAI responses (default: 0.0)
+
+4. **Deploy**: Railway will automatically build and deploy your bot
+
+## Configuration
+
+### Environment Variables
+
+#### Required Variables
+- `DISCORD_TOKEN`: Your Discord bot token
+- `OPENAI_API_KEY`: Your OpenAI API key
+- `SERVERS`: Server configuration in format: `guildID:guildName:logChannelID,guildID2:guildName2:logChannelID2`
+
+#### Optional Variables
+- `WEBHOOK_URLS`: Comma-separated webhook URLs for notifications
+- `OPENAI_MODEL`: OpenAI model to use (default: gpt-4o-mini)
+- `OPENAI_TEMP`: Temperature for OpenAI responses (default: 0.0)
+
+### Server Configuration Format
+
+The `SERVERS` environment variable uses this format:
+```
+guildID1:guildName1:logChannelID1,guildID2:guildName2:logChannelID2
+```
+
+Example:
+```
+988945059783278602:Server 1:1336461137767563304,798583171548840026:Server 2:1336503006623170580
+```
+
+### Webhook Configuration
+
+The `WEBHOOK_URLS` environment variable uses this format:
+```
+webhook1,webhook2,webhook3
+```
+
+Example:
+```
+https://discord.com/api/webhooks/webhook1,https://discord.com/api/webhooks/webhook2
 ```
 
 ## How It Works
@@ -89,34 +128,23 @@ python main.py
 4. **Notifications**: Webhook notifications are sent with details about the banned user and scam message
 5. **Logging**: All actions are logged to the respective server's log channel
 
-## Configuration Details
-
-### Server Configuration
-- `guild_id`: The Discord server ID
-- `guild_name`: Human-readable server name (for logging)
-- `log_channel_id`: Channel ID where bot logs will be posted
-
-### Webhook Configuration
-- `url`: Discord webhook URL for notifications
-- `name`: Human-readable name for the webhook (for logging)
-
 ## File Structure
 
 ```
 badbot-discord-automod/
 ├── main.py              # Main bot code
-├── config.json          # Server and webhook configuration
 ├── requirements.txt     # Python dependencies
-├── token.txt           # Discord bot token (create this)
-├── openai.txt          # OpenAI API key (create this)
+├── railway.json         # Railway deployment configuration
+├── Procfile            # Railway process file
+├── runtime.txt         # Python version specification
 └── README.md           # This file
 ```
 
 ## Security Considerations
 
 - Keep your bot token and API keys secure
-- Never commit credential files to version control
-- Use environment variables in production
+- Use environment variables for all sensitive configuration
+- Never commit credentials to version control
 - Regularly rotate API keys
 - Monitor bot logs for suspicious activity
 
@@ -128,6 +156,7 @@ badbot-discord-automod/
 2. **Ban failures**: Check that the bot has "Ban Members" permission in all servers
 3. **Webhook errors**: Verify webhook URLs are valid and accessible
 4. **GPT-4 errors**: Check your OpenAI API key and account status
+5. **Environment variable errors**: Ensure all required environment variables are set correctly
 
 ### Logging
 
@@ -137,6 +166,12 @@ The bot provides detailed logging at INFO level. Check the console output for:
 - GPT-4 analysis results
 - Ban operation results
 - Webhook notification status
+
+### Railway-Specific Issues
+
+1. **Build failures**: Check that all dependencies are listed in `requirements.txt`
+2. **Runtime errors**: Verify all environment variables are set in Railway dashboard
+3. **Bot not starting**: Check Railway logs for startup errors
 
 ## Contributing
 

@@ -7,7 +7,6 @@ configured servers and notifications are sent to webhooks.
 """
 
 import asyncio
-import json
 import logging
 import os
 from typing import Dict, List, Optional, Set
@@ -48,47 +47,80 @@ class BadBotAutoMod:
         self.banned_users: Set[int] = set()  # Track banned users to prevent duplicate processing
         
     def load_config(self) -> None:
-        """Load configuration from environment variables and config.json file."""
+        """Load configuration from environment variables."""
         try:
-            # Load server configurations from config.json
-            with open("config.json", "r") as f:
-                config = json.load(f)
+            # Load server configurations from environment variable
+            servers_env = os.environ.get("SERVERS")
+            if not servers_env:
+                logger.error("Environment variable 'SERVERS' not found")
+                raise ValueError("SERVERS environment variable is required")
                 
-            # Load server configurations
-            for server_data in config.get("servers", []):
-                server_config = ServerConfig(
-                    guild_id=server_data["guild_id"],
-                    guild_name=server_data["guild_name"],
-                    log_channel_id=server_data["log_channel_id"]
-                )
-                self.badbot_servers_automod[server_config.guild_id] = server_config
-                
-            logger.info(f"Loaded {len(self.badbot_servers_automod)} servers from config.json")
+            # Parse servers in format: guildID:guildName:logChannelID,guildID2:guildName2:logChannelID2
+            server_pairs = servers_env.split(',')
             
-        except FileNotFoundError:
-            logger.error("config.json not found. Please create it with proper configuration.")
-            raise
-        except json.JSONDecodeError as e:
-            logger.error(f"Invalid JSON in config.json: {e}")
-            raise
-        except KeyError as e:
-            logger.error(f"Missing required key in config.json: {e}")
+            for pair in server_pairs:
+                if ':' in pair:
+                    parts = pair.strip().split(':')
+                    if len(parts) == 3:
+                        guild_id_str, guild_name, log_channel_id_str = parts
+                        try:
+                            guild_id = int(guild_id_str.strip())
+                            log_channel_id = int(log_channel_id_str.strip())
+                            
+                            server_config = ServerConfig(
+                                guild_id=guild_id,
+                                guild_name=guild_name.strip(),
+                                log_channel_id=log_channel_id
+                            )
+                            self.badbot_servers_automod[guild_id] = server_config
+                            logger.info(f"Loaded server: {guild_name} ({guild_id}) with log channel {log_channel_id}")
+                        except ValueError:
+                            logger.warning(f"Invalid server ID or log channel ID format: {pair}")
+                            continue
+                    else:
+                        logger.warning(f"Invalid server format (expected guildID:guildName:logChannelID): {pair}")
+                        continue
+                        
+            logger.info(f"Loaded {len(self.badbot_servers_automod)} servers from environment")
+            
+            # Load webhook URLs from environment variable
+            webhooks_env = os.environ.get("WEBHOOK_URLS")
+            if webhooks_env:
+                # Parse webhooks in format: webhook1,webhook2,webhook3
+                webhook_urls = webhooks_env.split(',')
+                
+                for i, webhook_url in enumerate(webhook_urls):
+                    webhook_url = webhook_url.strip()
+                    if webhook_url:
+                        webhook_config = WebhookConfig(
+                            url=webhook_url,
+                            name=f"Webhook {i+1}"
+                        )
+                        self.webhook_urls.append(webhook_config)
+                        logger.info(f"Loaded webhook {i+1}: {webhook_url[:50]}...")
+                        
+                logger.info(f"Loaded {len(self.webhook_urls)} webhooks from environment")
+            else:
+                logger.warning("No webhooks configured - notifications will be disabled")
+            
+        except Exception as e:
+            logger.error(f"Error loading configuration: {e}")
             raise
     
     def load_credentials(self) -> str:
         """Load Discord token and OpenAI API key from environment variables."""
         try:
             # Load Discord token from environment variable
-            badbot_discord_token = os.environ.get("badbot_discord_token")
+            badbot_discord_token = os.environ.get("DISCORD_TOKEN")
             if not badbot_discord_token:
-                logger.error("Environment variable 'badbot_discord_token' not found")
-                raise ValueError("badbot_discord_token environment variable is required")
+                logger.error("Environment variable 'DISCORD_TOKEN' not found")
+                raise ValueError("DISCORD_TOKEN environment variable is required")
                 
             # Load OpenAI API key from environment variable
-            openai_apikey = os.environ.get("openai_apikey")
+            openai_apikey = os.environ.get("OPENAI_API_KEY")
             if not openai_apikey:
-                logger.error("Environment variable 'openai_apikey' not found")
-                raise ValueError("openai_apikey environment variable is required")
+                logger.error("Environment variable 'OPENAI_API_KEY' not found")
+                raise ValueError("OPENAI_API_KEY environment variable is required")
                 
             # Set OpenAI API key
             openai.api_key = openai_apikey
@@ -99,60 +131,6 @@ class BadBotAutoMod:
         except Exception as e:
             logger.error(f"Error loading credentials: {e}")
             raise
-    
-    def load_servers_from_env(self) -> None:
-        """Load server configurations from environment variable."""
-        try:
-            servers_env = os.environ.get("servers")
-            if not servers_env:
-                logger.warning("Environment variable 'servers' not found, using config.json only")
-                return
-                
-            # Parse servers in format: serverID1:servername1,serverID2:servername2
-            server_pairs = servers_env.split(',')
-            
-            for pair in server_pairs:
-                if ':' in pair:
-                    server_id_str, server_name = pair.strip().split(':', 1)
-                    try:
-                        server_id = int(server_id_str.strip())
-                        # Note: We still need log_channel_id from config.json
-                        # This will be merged with config.json data
-                        logger.info(f"Found server from env: {server_name} ({server_id})")
-                    except ValueError:
-                        logger.warning(f"Invalid server ID format: {server_id_str}")
-                        continue
-                        
-            logger.info(f"Loaded {len(server_pairs)} server pairs from environment")
-            
-        except Exception as e:
-            logger.error(f"Error loading servers from environment: {e}")
-    
-    def load_webhooks_from_env(self) -> None:
-        """Load webhook URLs from environment variable."""
-        try:
-            webhooks_env = os.environ.get("badbot_automod_webhookurl")
-            if not webhooks_env:
-                logger.warning("Environment variable 'badbot_automod_webhookurl' not found, using config.json only")
-                return
-                
-            # Parse webhooks in format: webhook1:webhook2:webhook3
-            webhook_urls = webhooks_env.split(':')
-            
-            for i, webhook_url in enumerate(webhook_urls):
-                webhook_url = webhook_url.strip()
-                if webhook_url:
-                    webhook_config = WebhookConfig(
-                        url=webhook_url,
-                        name=f"Webhook {i+1}"
-                    )
-                    self.webhook_urls.append(webhook_config)
-                    logger.info(f"Loaded webhook {i+1}: {webhook_url[:50]}...")
-                    
-            logger.info(f"Loaded {len(self.webhook_urls)} webhooks from environment")
-            
-        except Exception as e:
-            logger.error(f"Error loading webhooks from environment: {e}")
     
     async def check_gpt_for_scam(self, content: str) -> bool:
         """
@@ -466,8 +444,6 @@ class BadBotAutoMod:
         try:
             # Load configuration
             self.load_config()
-            self.load_servers_from_env()
-            self.load_webhooks_from_env()
             token = self.load_credentials()
             
             # Create and run bot
