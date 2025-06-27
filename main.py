@@ -288,24 +288,19 @@ class BadBotAutoMod:
         
         # Create embed message
         embed_data = {
-            "title": "🚨 Scammer Detected and Banned",
-            "description": f"User **{username}** (ID: {user_id}) has been banned from {successful_bans}/{total_servers} servers.",
+            "title": "🔨 Scammer Banned",
+            "description": f"User: {username} ({user_id})",
             "color": 0xFF0000,  # Red color
             "fields": [
                 {
                     "name": "Source Server",
-                    "value": source_guild_name,
+                    "value": f"Source Server: {source_guild_name}",
                     "inline": True
                 },
                 {
                     "name": "Scam Message",
-                    "value": f"```{message_content[:1000]}```",
+                    "value": f"Scam Message: ```{message_content[:1000]}```",
                     "inline": False
-                },
-                {
-                    "name": "Ban Results",
-                    "value": f"Successfully banned from {successful_bans} out of {total_servers} servers",
-                    "inline": True
                 }
             ],
             "timestamp": nextcord.utils.utcnow().isoformat()
