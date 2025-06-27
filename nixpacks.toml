@@ -1,11 +1,19 @@
 [phases.setup]
-nixPkgs = []
+nixPkgs = ["python311", "gcc", "pkg-config"]
 
 [phases.install]
-cmds = ["echo 'Using Dockerfile instead of Nixpacks'"]
+cmds = [
+    "pip install --upgrade pip",
+    "pip install --no-cache-dir nextcord==2.6.0",
+    "pip install --no-cache-dir openai==1.12.0", 
+    "pip install --no-cache-dir aiohttp==3.8.6",
+    "pip install --no-cache-dir typing-extensions==4.8.0",
+    "pip install --no-cache-dir fastapi==0.104.1",
+    "pip install --no-cache-dir uvicorn==0.24.0"
+]
 
 [phases.build]
 cmds = ["echo 'Build handled by Dockerfile'"]
 
 [start]
-cmd = "echo 'Start handled by Dockerfile'" 
+cmd = "python web_main_simple.py" 
