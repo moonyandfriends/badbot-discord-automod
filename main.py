@@ -87,43 +87,26 @@ class BadBotAutoMod:
             # Load webhook URLs from environment variable
             webhooks_env = os.environ.get("badbot_automod_webhookurls")
             if webhooks_env:
-                # Parse webhooks in format: webhook1:servername1,webhook2:servername2,webhook3
+                # Parse webhooks in format: webhook1|servername1,webhook2|servername2,webhook3
                 webhook_pairs = webhooks_env.split(',')
                 
                 for i, webhook_pair in enumerate(webhook_pairs):
                     webhook_pair = webhook_pair.strip()
                     if webhook_pair:
-                        # Check if webhook has server name by looking for the last colon
-                        # This handles URLs with colons like https://discord.com/api/webhooks/...
-                        last_colon_index = webhook_pair.rfind(':')
-                        
-                        if last_colon_index > 0 and last_colon_index < len(webhook_pair) - 1:
-                            # Check if the part after the last colon looks like a server name (not part of URL)
-                            potential_server_name = webhook_pair[last_colon_index + 1:].strip()
-                            
-                            # If it doesn't contain URL characters and isn't empty, treat as server name
-                            if (potential_server_name and 
-                                not any(char in potential_server_name for char in ['/', '?', '=', '&', '#']) and
-                                not potential_server_name.startswith('//')):
-                                
-                                webhook_url = webhook_pair[:last_colon_index].strip()
-                                server_name = potential_server_name
-                                webhook_config = WebhookConfig(
-                                    url=webhook_url,
-                                    name=f"Webhook {i+1} ({server_name})",
-                                    server_name=server_name
-                                )
-                                logger.info(f"Loaded webhook {i+1} for server '{server_name}': {webhook_url[:50]}...")
-                            else:
-                                # No server name, treat as general webhook
-                                webhook_config = WebhookConfig(
-                                    url=webhook_pair,
-                                    name=f"Webhook {i+1}",
-                                    server_name=None
-                                )
-                                logger.info(f"Loaded webhook {i+1}: {webhook_pair[:50]}...")
+                        # Check if webhook has server name using | as separator
+                        # This avoids conflicts with URLs and server names containing colons
+                        if '|' in webhook_pair:
+                            parts = webhook_pair.split('|', 1)
+                            webhook_url = parts[0].strip()
+                            server_name = parts[1].strip()
+                            webhook_config = WebhookConfig(
+                                url=webhook_url,
+                                name=f"Webhook {i+1} ({server_name})",
+                                server_name=server_name
+                            )
+                            logger.info(f"Loaded webhook {i+1} for server '{server_name}': {webhook_url[:50]}...")
                         else:
-                            # No colon found, treat as general webhook
+                            # No server name, treat as general webhook
                             webhook_config = WebhookConfig(
                                 url=webhook_pair,
                                 name=f"Webhook {i+1}",

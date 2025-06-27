@@ -50,7 +50,7 @@ pip install -r requirements.txt
 export badbot_discord_token="your_discord_bot_token"
 export badbot_openai_key="your_openai_api_key"
 export badbot_automod_servers="guildID1:guildName1:logChannelID1,guildID2:guildName2:logChannelID2"
-export badbot_automod_webhookurls="webhook1:servername1,webhook2:servername2,webhook3"
+export badbot_automod_webhookurls="webhook1|servername1,webhook2|servername2,webhook3"
 export openai_model="gpt-4o-mini"
 export openai_temperature="0.0"
 ```
@@ -113,25 +113,26 @@ Example:
 The `badbot_automod_webhookurls` environment variable supports two formats:
 
 #### Server-Specific Webhooks (Recommended)
-Format: `webhookURL:servername,webhookURL2:servername2`
+Format: `webhookURL|servername,webhookURL2|servername2`
 
-**Important:** The bot uses the **last colon** in the string to separate the webhook URL from the server name. This handles URLs with colons correctly.
+**Important:** Uses the pipe character (`|`) as separator to avoid conflicts with URLs and server names containing colons.
 
 Examples:
 ```
-# Correct - server name after last colon
-https://discord.com/api/webhooks/123456789/abcdef:Server 1
-https://discord.com/api/webhooks/987654321/xyz123:Server 2
+# Correct - server name after pipe separator
+https://discord.com/api/webhooks/123456789/abcdef|Server 1
+https://discord.com/api/webhooks/987654321/xyz123|Server 2
 
-# Also works with simple webhook URLs
-http://webhook.site/abc123:Server 1
+# Works with server names containing colons, emojis, etc.
+https://discord.com/api/webhooks/123456789/abcdef|🚨 Alert Server
+https://discord.com/api/webhooks/987654321/xyz123|Main: Gaming Server
 ```
 
 **Benefits:**
 - Notifications are sent to the specific server's webhook when a scam is detected
 - If no server-specific webhook is found, falls back to general webhooks
 - Better organization and targeted notifications
-- Handles URLs with colons correctly (like Discord webhook URLs)
+- No conflicts with URLs or server names containing colons, emojis, or special characters
 
 #### General Webhooks (Legacy)
 Format: `webhook1,webhook2,webhook3`
@@ -143,8 +144,8 @@ https://discord.com/api/webhooks/123456789/abcdef,https://discord.com/api/webhoo
 
 **Note:** 
 - Server names in webhooks must match the server names in `badbot_automod_servers` (case-insensitive)
-- The bot automatically detects server names by looking for the last colon in the string
-- If the part after the last colon contains URL characters (/, ?, =, etc.), it's treated as a general webhook
+- Uses pipe (`|`) as separator to avoid conflicts with colons in URLs or server names
+- Supports server names with emojis, colons, and other special characters
 
 ## How It Works
 
