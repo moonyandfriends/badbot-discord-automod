@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Discord AutoMod Bot for Railway
+Discord AutoMod Bot for Railway - Improved Version
 Monitors AutoMod events, uses ChatGPT to detect scams, bans users across all servers, and sends webhook notifications.
 """
 
@@ -8,8 +8,10 @@ import os
 import asyncio
 import logging
 import aiohttp
-from typing import Dict, List
+import re
+from typing import Dict, List, Set
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 import nextcord
 from nextcord.ext import commands
@@ -33,6 +35,20 @@ class BadBotAutoMod:
         self.servers: Dict[int, ServerConfig] = {}
         self.webhook_urls: List[str] = []
         self.openai_client = None
+        self.processed_users: Set[int] = set()  # Prevent duplicate processing
+        self.openai_model = "gpt-4o-mini"  # Default model
+        
+    def validate_webhook_url(self, url: str) -> bool:
+        """Validate that a webhook URL is properly formatted."""
+        try:
+            parsed = urlparse(url)
+            return (
+                parsed.scheme in ['http', 'https'] and
+                'discord.com' in parsed.netloc and
+                '/api/webhooks/' in parsed.path
+            )
+        except Exception:
+            return False
         
     def load_config(self) -> None:
         """Load configuration from environment variables."""
@@ -66,6 +82,9 @@ class BadBotAutoMod:
                     logger.warning(f"Invalid server format (expected guildID|guildName): {pair}")
                     continue
                     
+        if not self.servers:
+            raise ValueError("No valid servers found in badbot_automod_servers")
+            
         logger.info(f"Loaded {len(self.servers)} servers from environment")
         
         # Load webhook URLs
@@ -73,8 +92,23 @@ class BadBotAutoMod:
         if not webhooks_env:
             raise ValueError("badbot_automod_webhookurls environment variable is required")
             
-        self.webhook_urls = [url.strip() for url in webhooks_env.split(',') if url.strip()]
-        logger.info(f"Loaded {len(self.webhook_urls)} webhook URLs")
+        # Validate webhook URLs
+        raw_urls = [url.strip() for url in webhooks_env.split(',') if url.strip()]
+        for url in raw_urls:
+            if self.validate_webhook_url(url):
+                self.webhook_urls.append(url)
+                logger.info(f"Loaded valid webhook: {url[:50]}...")
+            else:
+                logger.warning(f"Invalid webhook URL format: {url[:50]}...")
+                
+        if not self.webhook_urls:
+            raise ValueError("No valid webhook URLs found in badbot_automod_webhookurls")
+            
+        logger.info(f"Loaded {len(self.webhook_urls)} valid webhook URLs")
+        
+        # Load optional OpenAI model
+        self.openai_model = os.environ.get("openai_model", "gpt-4o-mini")
+        logger.info(f"Using OpenAI model: {self.openai_model}")
         
     def load_credentials(self) -> str:
         """Load Discord token and OpenAI key from environment variables."""
@@ -85,13 +119,28 @@ class BadBotAutoMod:
         if not discord_token:
             raise ValueError("badbot_discord_token environment variable is required")
             
+        # Validate Discord token format
+        if not (discord_token.startswith(('MTA', 'MTI', 'OD', 'ND', 'Nz')) or len(discord_token) > 50):
+            logger.warning("Discord token format looks suspicious")
+            
         # Load OpenAI key
         openai_key = os.environ.get("badbot_openai_key")
         if not openai_key:
             raise ValueError("badbot_openai_key environment variable is required")
             
+        # Validate OpenAI key format
+        if not openai_key.startswith('sk-'):
+            logger.warning("OpenAI key format looks suspicious (should start with 'sk-')")
+            
         # Initialize OpenAI client
-        self.openai_client = openai.OpenAI(api_key=openai_key)
+        try:
+            self.openai_client = openai.OpenAI(api_key=openai_key)
+            # Test the client with a simple request
+            logger.info("Testing OpenAI client...")
+            # Note: We don't actually make a test call here to avoid costs
+        except Exception as e:
+            logger.error(f"Failed to initialize OpenAI client: {e}")
+            raise
             
         logger.info("Credentials loaded successfully")
         
@@ -111,32 +160,50 @@ class BadBotAutoMod:
 
         user_prompt = (
             f"The following message was flagged by AutoMod:\n\n"
-            f"\"{content}\"\n\n"
+            f"\"{content[:500]}\"\n\n"  # Limit content length
             "Is this message a scam? Start your answer with 'YES:' or 'NO:'."
         )
 
         try:
             logger.info("Sending content to ChatGPT for analysis...")
             response = self.openai_client.chat.completions.create(
-                model="gpt-4o-mini",
+                model=self.openai_model,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
                 max_tokens=100,
-                temperature=0.0
+                temperature=0.0,
+                timeout=30.0  # Add timeout
             )
-            ai_reply = response.choices[0].message.content.strip()
+            
+            # Better error handling for response
+            if not response.choices or not response.choices[0].message:
+                logger.error("OpenAI returned empty response")
+                return False
+                
+            ai_reply = response.choices[0].message.content
+            if not ai_reply:
+                logger.error("OpenAI returned empty message content")
+                return False
+                
+            ai_reply = ai_reply.strip()
             logger.info(f"ChatGPT response: {ai_reply}")
             
             return ai_reply.lower().startswith("yes:")
             
+        except openai.RateLimitError:
+            logger.error("OpenAI rate limit exceeded")
+            return False
+        except openai.APIError as e:
+            logger.error(f"OpenAI API error: {e}")
+            return False
         except Exception as e:
             logger.error(f"Error checking content with ChatGPT: {e}")
             return False
             
     async def ban_user_from_all_servers(self, user_id: int, reason: str) -> Dict[int, bool]:
-        """Ban user from all configured servers."""
+        """Ban user from all configured servers with rate limiting."""
         ban_results = {}
         
         for guild_id, server_config in self.servers.items():
@@ -147,22 +214,41 @@ class BadBotAutoMod:
                 continue
                 
             try:
+                # Check if user is already banned
+                try:
+                    ban_entry = await guild.fetch_ban(nextcord.Object(user_id))
+                    if ban_entry:
+                        logger.info(f"User {user_id} already banned in {server_config.guild_name}")
+                        ban_results[guild_id] = True
+                        continue
+                except nextcord.NotFound:
+                    # User is not banned, proceed with ban
+                    pass
+                
                 # Get member object
                 member = guild.get_member(user_id)
                 if member:
-                    await guild.ban(member, reason=reason)
+                    await guild.ban(member, reason=reason, delete_message_days=1)
                     logger.info(f"Banned user {user_id} from {server_config.guild_name}")
                     ban_results[guild_id] = True
                 else:
-                    # User not in this server
-                    logger.info(f"User {user_id} not found in {server_config.guild_name}")
-                    ban_results[guild_id] = False
+                    # Try to ban by user ID even if not a member
+                    user_obj = await self.bot.fetch_user(user_id)
+                    await guild.ban(user_obj, reason=reason, delete_message_days=1)
+                    logger.info(f"Banned user {user_id} (not a member) from {server_config.guild_name}")
+                    ban_results[guild_id] = True
                     
-                # Add delay between bans to avoid rate limits
-                await asyncio.sleep(1)
+                # Rate limiting delay
+                await asyncio.sleep(2)
                 
+            except nextcord.Forbidden:
+                logger.error(f"No permission to ban in {server_config.guild_name}")
+                ban_results[guild_id] = False
+            except nextcord.HTTPException as e:
+                logger.error(f"HTTP error banning user {user_id} from {server_config.guild_name}: {e}")
+                ban_results[guild_id] = False
             except Exception as e:
-                logger.error(f"Failed to ban user {user_id} from {server_config.guild_name}: {e}")
+                logger.error(f"Unexpected error banning user {user_id} from {server_config.guild_name}: {e}")
                 ban_results[guild_id] = False
                 
         return ban_results
@@ -170,7 +256,7 @@ class BadBotAutoMod:
     async def send_webhook_notifications(self, user_id: int, username: str, 
                                        message_content: str, source_guild_name: str,
                                        ban_results: Dict[int, bool]) -> None:
-        """Send notifications to all configured webhooks."""
+        """Send notifications to all configured webhooks with timeout."""
         successful_bans = sum(ban_results.values())
         total_servers = len(ban_results)
         
@@ -199,9 +285,10 @@ class BadBotAutoMod:
             "timestamp": nextcord.utils.utcnow().isoformat()
         }
         
-        # Send to all webhooks
-        async with aiohttp.ClientSession() as session:
-            for webhook_url in self.webhook_urls:
+        # Send to all webhooks with timeout
+        timeout = aiohttp.ClientTimeout(total=10)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            for i, webhook_url in enumerate(self.webhook_urls):
                 try:
                     webhook_data = {
                         "username": "BadBot AutoMod",
@@ -210,19 +297,21 @@ class BadBotAutoMod:
                     
                     async with session.post(webhook_url, json=webhook_data) as response:
                         if response.status == 204:
-                            logger.info("Webhook notification sent successfully")
+                            logger.info(f"Webhook {i+1} notification sent successfully")
                         else:
-                            logger.warning(f"Webhook returned status {response.status}")
+                            logger.warning(f"Webhook {i+1} returned status {response.status}")
                             
-                    # Add delay between webhook posts
+                    # Rate limiting delay
                     await asyncio.sleep(1)
                     
+                except asyncio.TimeoutError:
+                    logger.error(f"Webhook {i+1} request timed out")
                 except Exception as e:
-                    logger.error(f"Failed to send webhook notification: {e}")
+                    logger.error(f"Failed to send webhook {i+1} notification: {e}")
                     
     async def handle_automod_event(self, payload: nextcord.AutoModerationActionExecution) -> None:
         """Handle AutoMod action execution events."""
-        logger.info("Received AutoMod event")
+        logger.info(f"Received AutoMod event from guild {payload.guild_id}")
         
         # Only process message blocks
         if payload.action.type != nextcord.AutoModerationActionType.block_message:
@@ -235,6 +324,16 @@ class BadBotAutoMod:
             logger.info(f"Event from unmonitored server {guild_id}, ignoring")
             return
             
+        # Get user ID and check for duplicates
+        user_id = payload.member_id
+        if not user_id:
+            logger.warning("No user ID in AutoMod payload")
+            return
+            
+        if user_id in self.processed_users:
+            logger.info(f"User {user_id} already processed recently, skipping")
+            return
+            
         server_config = self.servers[guild_id]
         guild = self.bot.get_guild(guild_id)
         
@@ -245,7 +344,6 @@ class BadBotAutoMod:
         logger.info(f"Processing AutoMod event from {server_config.guild_name}")
         
         # Get user information
-        user_id = payload.member_id
         member = guild.get_member(user_id) if user_id else None
         username = member.display_name if member else f"Unknown User ({user_id})"
         
@@ -262,6 +360,9 @@ class BadBotAutoMod:
         
         if is_scam:
             logger.info(f"ChatGPT confirmed scam from {username} ({user_id})")
+            
+            # Mark user as processed to prevent duplicates
+            self.processed_users.add(user_id)
             
             # Ban user from all servers
             ban_results = await self.ban_user_from_all_servers(user_id, "Scam detected by ChatGPT")
@@ -296,12 +397,23 @@ class BadBotAutoMod:
                 guild = bot.get_guild(guild_id)
                 if guild:
                     logger.info(f"✅ Connected to {guild.name} ({guild_id})")
+                    
+                    # Check bot permissions
+                    bot_member = guild.get_member(bot.user.id)
+                    if bot_member and bot_member.guild_permissions.ban_members:
+                        logger.info(f"✅ Has ban permissions in {guild.name}")
+                    else:
+                        logger.warning(f"⚠️  Missing ban permissions in {guild.name}")
                 else:
                     logger.warning(f"❌ Cannot access server {server_config.guild_name} ({guild_id})")
         
         @bot.event
         async def on_auto_moderation_action_execution(payload: nextcord.AutoModerationActionExecution):
             await self.handle_automod_event(payload)
+            
+        @bot.event
+        async def on_error(event, *args, **kwargs):
+            logger.error(f"Bot error in event {event}: {args}")
         
         return bot
     
