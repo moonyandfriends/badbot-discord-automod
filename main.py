@@ -56,12 +56,12 @@ class BadBotAutoMod:
                 logger.error("Environment variable 'badbot_automod_servers' not found")
                 raise ValueError("badbot_automod_servers environment variable is required")
                 
-            # Parse servers in format: guildID:guildName:logChannelID,guildID2:guildName2:logChannelID2
+            # Parse servers in format: guildID|guildName|logChannelID,guildID2|guildName2|logChannelID2
             server_pairs = servers_env.split(',')
             
             for pair in server_pairs:
-                if ':' in pair:
-                    parts = pair.strip().split(':')
+                if '|' in pair:
+                    parts = pair.strip().split('|')
                     if len(parts) == 3:
                         guild_id_str, guild_name, log_channel_id_str = parts
                         try:
@@ -79,7 +79,7 @@ class BadBotAutoMod:
                             logger.warning(f"Invalid server ID or log channel ID format: {pair}")
                             continue
                     else:
-                        logger.warning(f"Invalid server format (expected guildID:guildName:logChannelID): {pair}")
+                        logger.warning(f"Invalid server format (expected guildID|guildName|logChannelID): {pair}")
                         continue
                         
             logger.info(f"Loaded {len(self.badbot_servers_automod)} servers from environment")

@@ -49,7 +49,7 @@ pip install -r requirements.txt
 ```bash
 export badbot_discord_token="your_discord_bot_token"
 export badbot_openai_key="your_openai_api_key"
-export badbot_automod_servers="guildID1:guildName1:logChannelID1,guildID2:guildName2:logChannelID2"
+export badbot_automod_servers="guildID1|guildName1|logChannelID1,guildID2|guildName2|logChannelID2"
 export badbot_automod_webhookurls="webhook1|servername1,webhook2|servername2,webhook3"
 export openai_model="gpt-4o-mini"
 export openai_temperature="0.0"
@@ -89,7 +89,7 @@ This bot is configured for easy deployment on Railway:
 #### Required Variables
 - `badbot_discord_token`: Your Discord bot token
 - `badbot_openai_key`: Your OpenAI API key
-- `badbot_automod_servers`: Server configuration in format: `guildID:guildName:logChannelID,guildID2:guildName2:logChannelID2`
+- `badbot_automod_servers`: Server configuration in format: `guildID|guildName|logChannelID,guildID2|guildName2|logChannelID2`
 
 #### Optional Variables
 - `badbot_automod_webhookurls`: Comma-separated webhook URLs for notifications
@@ -100,12 +100,18 @@ This bot is configured for easy deployment on Railway:
 
 The `badbot_automod_servers` environment variable uses this format:
 ```
-guildID1:guildName1:logChannelID1,guildID2:guildName2:logChannelID2
+guildID1|guildName1|logChannelID1,guildID2|guildName2|logChannelID2
 ```
 
-Example:
+**Important:** Uses pipe separators (`|`) to avoid conflicts with server names containing colons, emojis, or special characters.
+
+Examples:
 ```
-988945059783278602:Server 1:1336461137767563304,798583171548840026:Server 2:1336503006623170580
+# Basic server configuration
+988945059783278602|Server 1|1336461137767563304,798583171548840026|Server 2|1336503006623170580
+
+# Server names with special characters
+988945059783278602|🚨 Alert Server|1336461137767563304,798583171548840026|Main: Gaming Server|1336503006623170580
 ```
 
 ### Webhook Configuration
