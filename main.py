@@ -84,7 +84,7 @@ class BadBotAutoMod:
             logger.info(f"Loaded {len(self.badbot_servers_automod)} servers from environment")
             
             # Load webhook URLs from environment variable
-            webhooks_env = os.environ.get("badbot_automod_webhookurlss")
+            webhooks_env = os.environ.get("badbot_automod_webhookurls")
             if webhooks_env:
                 # Parse webhooks in format: webhook1,webhook2,webhook3
                 webhook_urls = webhooks_env.split(',')
