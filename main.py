@@ -134,10 +134,20 @@ class BadBotAutoMod:
             
         # Initialize OpenAI client
         try:
+            # Clear any problematic environment variables that might interfere
+            # Remove any proxy-related environment variables that might cause issues
+            for key in list(os.environ.keys()):
+                if 'proxy' in key.lower() or 'PROXY' in key:
+                    logger.info(f"Removing environment variable: {key}")
+                    del os.environ[key]
+            
+            # Initialize with minimal parameters
             self.openai_client = openai.OpenAI(api_key=openai_key)
             logger.info("OpenAI client initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize OpenAI client: {e}")
+            logger.error(f"Error type: {type(e).__name__}")
+            logger.error(f"Error details: {str(e)}")
             raise
             
         logger.info("Credentials loaded successfully")
