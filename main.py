@@ -152,10 +152,9 @@ class BadBotAutoMod:
             if cleared_vars:
                 logger.info(f"Cleared {len(cleared_vars)} environment variables: {cleared_vars}")
             
-            # Use legacy OpenAI API method which is more stable
-            openai.api_key = openai_key
-            self.openai_client = openai
-            logger.info("OpenAI client initialized successfully using legacy API")
+            # Use modern OpenAI API method
+            self.openai_client = openai.OpenAI(api_key=openai_key)
+            logger.info("OpenAI client initialized successfully using modern API")
         except Exception as e:
             logger.error(f"Failed to initialize OpenAI client: {e}")
             logger.error(f"Error type: {type(e).__name__}")
@@ -164,8 +163,7 @@ class BadBotAutoMod:
             # Try alternative initialization method
             try:
                 logger.info("Trying alternative OpenAI initialization...")
-                openai.api_key = openai_key
-                self.openai_client = openai
+                self.openai_client = openai.OpenAI(api_key=openai_key)
                 logger.info("OpenAI client initialized with alternative method")
             except Exception as e2:
                 logger.error(f"Alternative initialization also failed: {e2}")
@@ -195,7 +193,7 @@ class BadBotAutoMod:
 
         try:
             logger.info("Sending content to ChatGPT for analysis...")
-            response = self.openai_client.ChatCompletion.create(
+            response = self.openai_client.chat.completions.create(
                 model=self.openai_model,
                 messages=[
                     {"role": "system", "content": system_prompt},
