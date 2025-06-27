@@ -133,26 +133,43 @@ class BadBotAutoMod:
         try:
             webhooks_env = os.environ.get("badbot_automod_webhookurl")
             if not webhooks_env:
-                logger.warning("Environment variable 'badbot_automod_webhookurl' not found, using config.json only")
+                logger.warning("Environment variable 'badbot_automod_webhookurl' not found, webhooks will be disabled")
                 return
                 
             # Parse webhooks in format: webhook1:webhook2:webhook3
             webhook_urls = webhooks_env.split(':')
+            valid_webhooks = []
             
             for i, webhook_url in enumerate(webhook_urls):
                 webhook_url = webhook_url.strip()
                 if webhook_url:
-                    webhook_config = WebhookConfig(
-                        url=webhook_url,
-                        name=f"Webhook {i+1}"
-                    )
-                    self.webhook_urls.append(webhook_config)
-                    logger.info(f"Loaded webhook {i+1}: {webhook_url[:50]}...")
-                    
-            logger.info(f"Loaded {len(self.webhook_urls)} webhooks from environment")
+                    # Validate webhook URL format - accept both discord.com and discordapp.com
+                    if (webhook_url.startswith("https://discord.com/api/webhooks/") or 
+                        webhook_url.startswith("https://discordapp.com/api/webhooks/")):
+                        
+                        # Convert discordapp.com to discord.com if needed
+                        if webhook_url.startswith("https://discordapp.com/api/webhooks/"):
+                            webhook_url = webhook_url.replace("discordapp.com", "discord.com")
+                            logger.info(f"Converted discordapp.com URL to discord.com for webhook {i+1}")
+                        
+                        webhook_config = WebhookConfig(
+                            url=webhook_url,
+                            name=f"Webhook {i+1}"
+                        )
+                        self.webhook_urls.append(webhook_config)
+                        valid_webhooks.append(webhook_url)
+                        logger.info(f"Loaded webhook {i+1}: {webhook_url[:50]}...")
+                    else:
+                        logger.warning(f"Invalid webhook URL format: {webhook_url[:50]}...")
+                        
+            if not valid_webhooks:
+                logger.warning("No valid webhook URLs found, webhooks will be disabled")
+            else:
+                logger.info(f"Loaded {len(valid_webhooks)} valid webhooks from environment")
             
         except Exception as e:
             logger.error(f"Error loading webhooks from environment: {e}")
+            logger.warning("Webhooks will be disabled due to error")
     
     async def check_gpt_for_scam(self, content: str) -> bool:
         """
