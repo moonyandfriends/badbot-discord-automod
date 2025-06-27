@@ -115,25 +115,36 @@ The `badbot_automod_webhookurls` environment variable supports two formats:
 #### Server-Specific Webhooks (Recommended)
 Format: `webhookURL:servername,webhookURL2:servername2`
 
-Example:
+**Important:** The bot uses the **last colon** in the string to separate the webhook URL from the server name. This handles URLs with colons correctly.
+
+Examples:
 ```
-https://discord.com/api/webhooks/webhook1:Server 1,https://discord.com/api/webhooks/webhook2:Server 2
+# Correct - server name after last colon
+https://discord.com/api/webhooks/123456789/abcdef:Server 1
+https://discord.com/api/webhooks/987654321/xyz123:Server 2
+
+# Also works with simple webhook URLs
+http://webhook.site/abc123:Server 1
 ```
 
 **Benefits:**
 - Notifications are sent to the specific server's webhook when a scam is detected
 - If no server-specific webhook is found, falls back to general webhooks
 - Better organization and targeted notifications
+- Handles URLs with colons correctly (like Discord webhook URLs)
 
 #### General Webhooks (Legacy)
 Format: `webhook1,webhook2,webhook3`
 
-Example:
+Examples:
 ```
-https://discord.com/api/webhooks/webhook1,https://discord.com/api/webhooks/webhook2
+https://discord.com/api/webhooks/123456789/abcdef,https://discord.com/api/webhooks/987654321/xyz123
 ```
 
-**Note:** Server names in webhooks must match the server names in `badbot_automod_servers` (case-insensitive).
+**Note:** 
+- Server names in webhooks must match the server names in `badbot_automod_servers` (case-insensitive)
+- The bot automatically detects server names by looking for the last colon in the string
+- If the part after the last colon contains URL characters (/, ?, =, etc.), it's treated as a general webhook
 
 ## How It Works
 
