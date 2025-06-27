@@ -92,6 +92,7 @@ class BadBotAutoMod:
             
         # Initialize OpenAI client
         self.openai_client = openai.OpenAI(api_key=openai_key)
+            
         logger.info("Credentials loaded successfully")
         
         return discord_token
