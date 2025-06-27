@@ -82,6 +82,38 @@ This bot is configured for easy deployment on Railway:
 
 4. **Deploy**: Railway will automatically build and deploy your bot
 
+#### Alternative Deployment Methods
+
+**If Railway builds hang or fail:**
+
+1. **Use Docker Deployment**:
+   - Railway supports Dockerfile deployment
+   - The included Dockerfile provides a more reliable build process
+   - Set Railway to use Docker instead of Nixpacks
+
+2. **Use Heroku**:
+   - Deploy using the included Procfile
+   - Set environment variables in Heroku dashboard
+   - Use `heroku container:push web` for Docker deployment
+
+3. **Use DigitalOcean App Platform**:
+   - Supports Python apps directly
+   - Set environment variables in the dashboard
+   - Uses the included Dockerfile
+
+#### Troubleshooting Railway Build Issues
+
+**If builds hang on Nixpacks:**
+1. **Try Docker deployment** instead of Nixpacks
+2. **Check Railway logs** for specific error messages
+3. **Verify environment variables** are set correctly
+4. **Use the test script** locally: `python test_startup.py`
+
+**Common issues:**
+- **Build timeout**: Use Dockerfile instead of Nixpacks
+- **Dependency conflicts**: Check requirements.txt versions
+- **Environment variables**: Ensure all required variables are set
+
 ## Configuration
 
 ### Environment Variables
