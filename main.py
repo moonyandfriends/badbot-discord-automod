@@ -44,7 +44,7 @@ class BadBotAutoMod:
             parsed = urlparse(url)
             return (
                 parsed.scheme in ['http', 'https'] and
-                'discord.com' in parsed.netloc and
+                ('discord.com' in parsed.netloc or 'discordapp.com' in parsed.netloc) and
                 '/api/webhooks/' in parsed.path
             )
         except Exception:
@@ -102,9 +102,9 @@ class BadBotAutoMod:
                 logger.warning(f"Invalid webhook URL format: {url[:50]}...")
                 
         if not self.webhook_urls:
-            raise ValueError("No valid webhook URLs found in badbot_automod_webhookurls")
-            
-        logger.info(f"Loaded {len(self.webhook_urls)} valid webhook URLs")
+            logger.warning("No valid webhook URLs found in badbot_automod_webhookurls. Webhook notifications will be disabled.")
+        else:
+            logger.info(f"Loaded {len(self.webhook_urls)} valid webhook URLs")
         
         # Load optional OpenAI model
         self.openai_model = os.environ.get("openai_model", "gpt-4o-mini")
@@ -135,9 +135,7 @@ class BadBotAutoMod:
         # Initialize OpenAI client
         try:
             self.openai_client = openai.OpenAI(api_key=openai_key)
-            # Test the client with a simple request
-            logger.info("Testing OpenAI client...")
-            # Note: We don't actually make a test call here to avoid costs
+            logger.info("OpenAI client initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize OpenAI client: {e}")
             raise
