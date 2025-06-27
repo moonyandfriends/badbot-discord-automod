@@ -36,6 +36,7 @@ class WebhookConfig:
     """Configuration for webhook notifications."""
     url: str
     name: str
+    server_name: Optional[str] = None
 
 class BadBotAutoMod:
     """Main bot class for handling AutoMod events and scam detection."""
@@ -86,18 +87,33 @@ class BadBotAutoMod:
             # Load webhook URLs from environment variable
             webhooks_env = os.environ.get("badbot_automod_webhookurls")
             if webhooks_env:
-                # Parse webhooks in format: webhook1,webhook2,webhook3
-                webhook_urls = webhooks_env.split(',')
+                # Parse webhooks in format: webhook1:servername1,webhook2:servername2,webhook3
+                webhook_pairs = webhooks_env.split(',')
                 
-                for i, webhook_url in enumerate(webhook_urls):
-                    webhook_url = webhook_url.strip()
-                    if webhook_url:
-                        webhook_config = WebhookConfig(
-                            url=webhook_url,
-                            name=f"Webhook {i+1}"
-                        )
+                for i, webhook_pair in enumerate(webhook_pairs):
+                    webhook_pair = webhook_pair.strip()
+                    if webhook_pair:
+                        # Check if webhook has server name (format: webhookURL:servername)
+                        if ':' in webhook_pair:
+                            parts = webhook_pair.split(':', 1)
+                            webhook_url = parts[0].strip()
+                            server_name = parts[1].strip()
+                            webhook_config = WebhookConfig(
+                                url=webhook_url,
+                                name=f"Webhook {i+1} ({server_name})",
+                                server_name=server_name
+                            )
+                            logger.info(f"Loaded webhook {i+1} for server '{server_name}': {webhook_url[:50]}...")
+                        else:
+                            # Legacy format: just webhook URL
+                            webhook_config = WebhookConfig(
+                                url=webhook_pair,
+                                name=f"Webhook {i+1}",
+                                server_name=None
+                            )
+                            logger.info(f"Loaded webhook {i+1}: {webhook_pair[:50]}...")
+                        
                         self.webhook_urls.append(webhook_config)
-                        logger.info(f"Loaded webhook {i+1}: {webhook_url[:50]}...")
                         
                 logger.info(f"Loaded {len(self.webhook_urls)} webhooks from environment")
             else:
@@ -233,7 +249,7 @@ class BadBotAutoMod:
                                        message_content: str, source_guild_name: str,
                                        source_guild_id: int, ban_results: Dict[int, bool]) -> None:
         """
-        Send notifications to all configured webhooks.
+        Send notifications to configured webhooks.
         
         Args:
             user_id: The banned user's ID
@@ -285,19 +301,38 @@ class BadBotAutoMod:
         
         embed.set_footer(text="BadBot AutoMod System")
         
-        # Send to all webhooks
+        # Send to webhooks - prioritize server-specific webhooks
         async with aiohttp.ClientSession() as session:
+            # First, try to send to server-specific webhooks
+            server_specific_sent = False
             for webhook_config in self.webhook_urls:
-                try:
-                    webhook = nextcord.Webhook.from_url(webhook_config.url, session=session)
-                    await webhook.send(embed=embed)
-                    logger.info(f"Sent webhook notification to {webhook_config.name}")
-                    
-                    # Wait 2 seconds between webhook posts
-                    await asyncio.sleep(2)
-                    
-                except Exception as e:
-                    logger.error(f"Failed to send webhook to {webhook_config.name}: {e}")
+                if webhook_config.server_name and webhook_config.server_name.lower() == source_guild_name.lower():
+                    try:
+                        webhook = nextcord.Webhook.from_url(webhook_config.url, session=session)
+                        await webhook.send(embed=embed)
+                        logger.info(f"Sent server-specific webhook notification to {webhook_config.name}")
+                        server_specific_sent = True
+                        
+                        # Wait 2 seconds between webhook posts
+                        await asyncio.sleep(2)
+                        
+                    except Exception as e:
+                        logger.error(f"Failed to send server-specific webhook to {webhook_config.name}: {e}")
+            
+            # If no server-specific webhook was found or sent, send to general webhooks
+            if not server_specific_sent:
+                for webhook_config in self.webhook_urls:
+                    if not webhook_config.server_name:  # Only general webhooks
+                        try:
+                            webhook = nextcord.Webhook.from_url(webhook_config.url, session=session)
+                            await webhook.send(embed=embed)
+                            logger.info(f"Sent general webhook notification to {webhook_config.name}")
+                            
+                            # Wait 2 seconds between webhook posts
+                            await asyncio.sleep(2)
+                            
+                        except Exception as e:
+                            logger.error(f"Failed to send general webhook to {webhook_config.name}: {e}")
     
     async def handle_automod_event(self, payload: nextcord.AutoModerationActionExecution) -> None:
         """
