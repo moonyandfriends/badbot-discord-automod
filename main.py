@@ -117,10 +117,10 @@ class BadBotAutoMod:
                 raise ValueError("badbot_discord_token environment variable is required")
                 
             # Load OpenAI API key from environment variable
-            openai_apikey = os.environ.get("openai_key")
+            openai_apikey = os.environ.get("badbot_openai_key")
             if not openai_apikey:
-                logger.error("Environment variable 'openai_key' not found")
-                raise ValueError("openai_key environment variable is required")
+                logger.error("Environment variable 'badbot_openai_key' not found")
+                raise ValueError("badbot_openai_key environment variable is required")
                 
             # Set OpenAI API key
             openai.api_key = openai_apikey

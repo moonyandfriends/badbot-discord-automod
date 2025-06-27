@@ -48,7 +48,7 @@ pip install -r requirements.txt
 3. Set up environment variables:
 ```bash
 export badbot_discord_token="your_discord_bot_token"
-export openai_key="your_openai_api_key"
+export badbot_openai_key="your_openai_api_key"
 export badbot_automod_servers="guildID1:guildName1:logChannelID1,guildID2:guildName2:logChannelID2"
 export badbot_automod_webhookurls="webhook1,webhook2,webhook3"
 export openai_model="gpt-4o-mini"
@@ -74,7 +74,7 @@ This bot is configured for easy deployment on Railway:
 
 3. **Configure Environment Variables** in Railway:
    - `badbot_discord_token`: Your Discord bot token
-   - `openai_key`: Your OpenAI API key
+   - `badbot_openai_key`: Your OpenAI API key
    - `badbot_automod_servers`: Server configuration (see format below)
    - `badbot_automod_webhookurls`: Comma-separated webhook URLs (optional)
    - `openai_model`: OpenAI model to use (default: gpt-4o-mini)
@@ -88,7 +88,7 @@ This bot is configured for easy deployment on Railway:
 
 #### Required Variables
 - `badbot_discord_token`: Your Discord bot token
-- `openai_key`: Your OpenAI API key
+- `badbot_openai_key`: Your OpenAI API key
 - `badbot_automod_servers`: Server configuration in format: `guildID:guildName:logChannelID,guildID2:guildName2:logChannelID2`
 
 #### Optional Variables
