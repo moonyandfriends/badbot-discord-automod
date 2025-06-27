@@ -294,7 +294,7 @@ class BadBotAutoMod:
             "fields": [
                 {
                     "name": "**Source Server:**",
-                    "value": f"**{source_guild_name}**",
+                    "value": source_guild_name,
                     "inline": True
                 },
                 {
