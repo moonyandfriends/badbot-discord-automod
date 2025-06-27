@@ -8,6 +8,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application
 COPY main.py .
+COPY web_main.py .
+
+EXPOSE 8000
 
 # Run the bot
-CMD ["python", "main.py"] 
+CMD ["python", "web_main.py"] 
