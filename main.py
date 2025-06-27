@@ -134,21 +134,42 @@ class BadBotAutoMod:
             
         # Initialize OpenAI client
         try:
+            # Debug: Log all environment variables that might cause issues
+            logger.info("Checking environment variables...")
+            for key, value in os.environ.items():
+                if any(term in key.lower() for term in ['proxy', 'http', 'https', 'openai']):
+                    logger.info(f"Found potentially problematic env var: {key}={value[:20]}...")
+            
             # Clear any problematic environment variables that might interfere
             # Remove any proxy-related environment variables that might cause issues
+            cleared_vars = []
             for key in list(os.environ.keys()):
-                if 'proxy' in key.lower() or 'PROXY' in key:
+                if any(term in key.lower() for term in ['proxy', 'http_proxy', 'https_proxy', 'all_proxy']):
                     logger.info(f"Removing environment variable: {key}")
+                    cleared_vars.append(key)
                     del os.environ[key]
             
-            # Initialize with minimal parameters
-            self.openai_client = openai.OpenAI(api_key=openai_key)
-            logger.info("OpenAI client initialized successfully")
+            if cleared_vars:
+                logger.info(f"Cleared {len(cleared_vars)} environment variables: {cleared_vars}")
+            
+            # Use legacy OpenAI API method which is more stable
+            openai.api_key = openai_key
+            self.openai_client = openai
+            logger.info("OpenAI client initialized successfully using legacy API")
         except Exception as e:
             logger.error(f"Failed to initialize OpenAI client: {e}")
             logger.error(f"Error type: {type(e).__name__}")
             logger.error(f"Error details: {str(e)}")
-            raise
+            
+            # Try alternative initialization method
+            try:
+                logger.info("Trying alternative OpenAI initialization...")
+                openai.api_key = openai_key
+                self.openai_client = openai
+                logger.info("OpenAI client initialized with alternative method")
+            except Exception as e2:
+                logger.error(f"Alternative initialization also failed: {e2}")
+                raise e2
             
         logger.info("Credentials loaded successfully")
         
@@ -174,15 +195,14 @@ class BadBotAutoMod:
 
         try:
             logger.info("Sending content to ChatGPT for analysis...")
-            response = self.openai_client.chat.completions.create(
+            response = self.openai_client.ChatCompletion.create(
                 model=self.openai_model,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
                 max_tokens=100,
-                temperature=0.0,
-                timeout=30.0  # Add timeout
+                temperature=0.0
             )
             
             # Better error handling for response
