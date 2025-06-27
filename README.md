@@ -47,12 +47,12 @@ pip install -r requirements.txt
 
 3. Set up environment variables:
 ```bash
-export DISCORD_TOKEN="your_discord_bot_token"
-export OPENAI_API_KEY="your_openai_api_key"
-export SERVERS="guildID1:guildName1:logChannelID1,guildID2:guildName2:logChannelID2"
-export WEBHOOK_URLS="webhook1,webhook2,webhook3"
-export OPENAI_MODEL="gpt-4o-mini"
-export OPENAI_TEMP="0.0"
+export badbot_discord_token="your_discord_bot_token"
+export openai_key="your_openai_api_key"
+export badbot_automod_servers="guildID1:guildName1:logChannelID1,guildID2:guildName2:logChannelID2"
+export badbot_automod_webhookurlss="webhook1,webhook2,webhook3"
+export openai_model="gpt-4o-mini"
+export openai_temperature="0.0"
 ```
 
 4. Run the bot:
@@ -73,12 +73,12 @@ This bot is configured for easy deployment on Railway:
    - Select this repository
 
 3. **Configure Environment Variables** in Railway:
-   - `DISCORD_TOKEN`: Your Discord bot token
-   - `OPENAI_API_KEY`: Your OpenAI API key
-   - `SERVERS`: Server configuration (see format below)
-   - `WEBHOOK_URLS`: Comma-separated webhook URLs (optional)
-   - `OPENAI_MODEL`: OpenAI model to use (default: gpt-4o-mini)
-   - `OPENAI_TEMP`: Temperature for OpenAI responses (default: 0.0)
+   - `badbot_discord_token`: Your Discord bot token
+   - `openai_key`: Your OpenAI API key
+   - `badbot_automod_servers`: Server configuration (see format below)
+   - `badbot_automod_webhookurlss`: Comma-separated webhook URLs (optional)
+   - `openai_model`: OpenAI model to use (default: gpt-4o-mini)
+   - `openai_temperature`: Temperature for OpenAI responses (default: 0.0)
 
 4. **Deploy**: Railway will automatically build and deploy your bot
 
@@ -87,18 +87,18 @@ This bot is configured for easy deployment on Railway:
 ### Environment Variables
 
 #### Required Variables
-- `DISCORD_TOKEN`: Your Discord bot token
-- `OPENAI_API_KEY`: Your OpenAI API key
-- `SERVERS`: Server configuration in format: `guildID:guildName:logChannelID,guildID2:guildName2:logChannelID2`
+- `badbot_discord_token`: Your Discord bot token
+- `openai_key`: Your OpenAI API key
+- `badbot_automod_servers`: Server configuration in format: `guildID:guildName:logChannelID,guildID2:guildName2:logChannelID2`
 
 #### Optional Variables
-- `WEBHOOK_URLS`: Comma-separated webhook URLs for notifications
-- `OPENAI_MODEL`: OpenAI model to use (default: gpt-4o-mini)
-- `OPENAI_TEMP`: Temperature for OpenAI responses (default: 0.0)
+- `badbot_automod_webhookurlss`: Comma-separated webhook URLs for notifications
+- `openai_model`: OpenAI model to use (default: gpt-4o-mini)
+- `openai_temperature`: Temperature for OpenAI responses (default: 0.0)
 
 ### Server Configuration Format
 
-The `SERVERS` environment variable uses this format:
+The `badbot_automod_servers` environment variable uses this format:
 ```
 guildID1:guildName1:logChannelID1,guildID2:guildName2:logChannelID2
 ```
@@ -110,7 +110,7 @@ Example:
 
 ### Webhook Configuration
 
-The `WEBHOOK_URLS` environment variable uses this format:
+The `badbot_automod_webhookurlss` environment variable uses this format:
 ```
 webhook1,webhook2,webhook3
 ```

@@ -50,10 +50,10 @@ class BadBotAutoMod:
         """Load configuration from environment variables."""
         try:
             # Load server configurations from environment variable
-            servers_env = os.environ.get("SERVERS")
+            servers_env = os.environ.get("badbot_automod_servers")
             if not servers_env:
-                logger.error("Environment variable 'SERVERS' not found")
-                raise ValueError("SERVERS environment variable is required")
+                logger.error("Environment variable 'badbot_automod_servers' not found")
+                raise ValueError("badbot_automod_servers environment variable is required")
                 
             # Parse servers in format: guildID:guildName:logChannelID,guildID2:guildName2:logChannelID2
             server_pairs = servers_env.split(',')
@@ -84,7 +84,7 @@ class BadBotAutoMod:
             logger.info(f"Loaded {len(self.badbot_servers_automod)} servers from environment")
             
             # Load webhook URLs from environment variable
-            webhooks_env = os.environ.get("WEBHOOK_URLS")
+            webhooks_env = os.environ.get("badbot_automod_webhookurlss")
             if webhooks_env:
                 # Parse webhooks in format: webhook1,webhook2,webhook3
                 webhook_urls = webhooks_env.split(',')
@@ -111,16 +111,16 @@ class BadBotAutoMod:
         """Load Discord token and OpenAI API key from environment variables."""
         try:
             # Load Discord token from environment variable
-            badbot_discord_token = os.environ.get("DISCORD_TOKEN")
+            badbot_discord_token = os.environ.get("badbot_discord_token")
             if not badbot_discord_token:
-                logger.error("Environment variable 'DISCORD_TOKEN' not found")
-                raise ValueError("DISCORD_TOKEN environment variable is required")
+                logger.error("Environment variable 'badbot_discord_token' not found")
+                raise ValueError("badbot_discord_token environment variable is required")
                 
             # Load OpenAI API key from environment variable
-            openai_apikey = os.environ.get("OPENAI_API_KEY")
+            openai_apikey = os.environ.get("openai_key")
             if not openai_apikey:
-                logger.error("Environment variable 'OPENAI_API_KEY' not found")
-                raise ValueError("OPENAI_API_KEY environment variable is required")
+                logger.error("Environment variable 'openai_key' not found")
+                raise ValueError("openai_key environment variable is required")
                 
             # Set OpenAI API key
             openai.api_key = openai_apikey
@@ -161,7 +161,7 @@ class BadBotAutoMod:
         try:
             # Get OpenAI model and temperature from environment variables
             openai_model = os.environ.get("openai_model", "gpt-4o-mini")
-            openai_temp = float(os.environ.get("openai_temp", "0.0"))
+            openai_temp = float(os.environ.get("openai_temperature", "0.0"))
             
             response = openai.chat.completions.create(
                 model=openai_model,
