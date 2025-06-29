@@ -1,8 +1,8 @@
-# Discord AutoMod Bot for Railway
+# 🤖 Bad Bot Auto Mod
 
 A Discord bot that monitors AutoMod events, uses ChatGPT to detect scams, bans users across multiple servers, and sends webhook notifications.
 
-## Features
+## ✨ Features
 
 - **Multi-Server Monitoring**: Monitors AutoMod events across multiple Discord servers
 - **AI Scam Detection**: Uses ChatGPT to analyze flagged messages for scam content
@@ -13,7 +13,15 @@ A Discord bot that monitors AutoMod events, uses ChatGPT to detect scams, bans u
 - **Robust Error Handling**: Comprehensive error handling and validation
 - **Permission Checking**: Verifies bot permissions on startup
 
-## Environment Variables
+## 🔧 How It Works
+
+1. Bot monitors AutoMod events in configured servers
+2. When a message is blocked by AutoMod, it's analyzed by ChatGPT
+3. If ChatGPT determines it's a scam, the user is banned from all servers
+4. Notifications are sent to all configured webhooks
+5. Duplicate processing is prevented for the same user
+
+## 🔧 Environment Variables
 
 Set these in your Railway dashboard:
 
@@ -49,7 +57,7 @@ openai_model=gpt-4o-mini
 - Server names can contain spaces but avoid special characters
 - Webhook URLs are automatically validated on startup
 
-## Railway Deployment
+## 🚀 Railway Deployment
 
 1. Fork this repository
 2. Connect your Railway account to GitHub
@@ -57,15 +65,7 @@ openai_model=gpt-4o-mini
 4. Set the environment variables in Railway dashboard
 5. Deploy!
 
-## How It Works
-
-1. Bot monitors AutoMod events in configured servers
-2. When a message is blocked by AutoMod, it's analyzed by ChatGPT
-3. If ChatGPT determines it's a scam, the user is banned from all servers
-4. Notifications are sent to all configured webhooks
-5. Duplicate processing is prevented for the same user
-
-## Bot Permissions
+## 🔐 Bot Permissions
 
 Your Discord bot needs these permissions:
 - `Ban Members` - To ban users from servers
