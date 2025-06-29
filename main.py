@@ -264,6 +264,15 @@ class BadBotAutoMod:
         else:
             logger.info(f"Loaded {len(self.webhook_urls)} valid webhook URLs")
         
+        # Load webhook avatar URL (optional)
+        self.webhook_avatar_url = os.environ.get("badbot_automod_webhook_avatar")
+        if self.webhook_avatar_url:
+            logger.info(f"Using custom webhook avatar: {self.webhook_avatar_url[:50]}...")
+        else:
+            # Default security/shield icon - simple and reliable
+            self.webhook_avatar_url = "https://i.imgur.com/8tBXd6L.png"
+            logger.info("Using default webhook avatar (shield icon)")
+        
         # Load optional OpenAI model
         self.openai_model = os.environ.get("openai_model", "gpt-4o-mini")
         logger.info(f"Using OpenAI model: {self.openai_model}")
@@ -490,6 +499,7 @@ class BadBotAutoMod:
         for i, webhook_url in enumerate(self.webhook_urls):
             webhook_data = {
                 "username": "BadBot AutoMod",
+                "avatar_url": self.webhook_avatar_url,
                 "embeds": [embed_data]
             }
             
