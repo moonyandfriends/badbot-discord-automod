@@ -208,6 +208,23 @@ class BadBotAutoMod:
         except Exception:
             return False
         
+    def validate_avatar_url(self, url: str) -> bool:
+        """Validate that an avatar URL is properly formatted and accessible."""
+        try:
+            parsed = urlparse(url)
+            # Check if it's a valid HTTP/HTTPS URL
+            if parsed.scheme not in ['http', 'https']:
+                return False
+            
+            # Check if it has a valid image extension
+            valid_extensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp']
+            if not any(parsed.path.lower().endswith(ext) for ext in valid_extensions):
+                return False
+                
+            return True
+        except Exception:
+            return False
+
     def load_config(self) -> None:
         """Load configuration from environment variables."""
         logger.info("Loading configuration from environment variables...")
@@ -267,8 +284,13 @@ class BadBotAutoMod:
         # Load webhook avatar URL (optional)
         self.webhook_avatar_url = os.environ.get("badbot_automod_webhook_avatar")
         if self.webhook_avatar_url:
-            logger.info(f"Using custom webhook avatar: {self.webhook_avatar_url[:50]}...")
-        else:
+            if self.validate_avatar_url(self.webhook_avatar_url):
+                logger.info(f"Using custom webhook avatar: {self.webhook_avatar_url[:50]}...")
+            else:
+                logger.warning(f"Invalid avatar URL format: {self.webhook_avatar_url[:50]}...")
+                self.webhook_avatar_url = None
+        
+        if not self.webhook_avatar_url:
             # Default security/shield icon - simple and reliable
             self.webhook_avatar_url = "https://i.imgur.com/8tBXd6L.png"
             logger.info("Using default webhook avatar (shield icon)")
@@ -494,9 +516,15 @@ class BadBotAutoMod:
         for i, webhook_url in enumerate(self.webhook_urls):
             webhook_data = {
                 "username": "BadBot AutoMod",
-                "avatar_url": self.webhook_avatar_url,
                 "embeds": [embed_data]
             }
+            
+            # Only add avatar_url if it's valid
+            if self.webhook_avatar_url and self.validate_avatar_url(self.webhook_avatar_url):
+                webhook_data["avatar_url"] = self.webhook_avatar_url
+                logger.debug(f"Adding avatar URL to webhook {i+1}: {self.webhook_avatar_url[:50]}...")
+            else:
+                logger.warning(f"Skipping avatar URL for webhook {i+1} - invalid or missing")
             
             await self.webhook_queue.add_webhook_message(webhook_url, webhook_data)
             logger.info(f"Added webhook {i+1} to queue")
