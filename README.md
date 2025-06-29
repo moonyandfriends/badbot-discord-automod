@@ -21,6 +21,16 @@ A Discord bot that monitors AutoMod events, uses ChatGPT to detect scams, bans u
 4. Notifications are sent to all configured webhooks
 5. Duplicate processing is prevented for the same user
 
+## 🤖 Bot Info
+
+Your Discord bot only needs the **Ban Members** permission to function properly.
+
+### Quick Add Bot
+[Add Bad Bot to your server](https://discord.com/oauth2/authorize?client_id=1385655724960645200&permissions=4&scope=bot)
+
+**Required Permission:**
+- `Ban Members` - To ban users from servers
+
 ## ⚙️ Environment Variables
 
 Set these in your Railway dashboard:
@@ -64,13 +74,6 @@ openai_model=gpt-4o-mini
 3. Create a new Railway project from your fork
 4. Set the environment variables in Railway dashboard
 5. Deploy!
-
-## 🔐 Bot Permissions
-
-Your Discord bot only needs the **Ban Members** permission to function properly.
-
-### Quick Add Bot
-[Add Bad Bot to your server](https://discord.com/oauth2/authorize?client_id=1385655724960645200&permissions=4&scope=bot)
 
 **Required Permission:**
 - `Ban Members` - To ban users from servers 
