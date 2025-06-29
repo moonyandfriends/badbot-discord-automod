@@ -21,7 +21,7 @@ A Discord bot that monitors AutoMod events, uses ChatGPT to detect scams, bans u
 4. Notifications are sent to all configured webhooks
 5. Duplicate processing is prevented for the same user
 
-## 🔧 Environment Variables
+## ⚙️ Environment Variables
 
 Set these in your Railway dashboard:
 
@@ -67,31 +67,10 @@ openai_model=gpt-4o-mini
 
 ## 🔐 Bot Permissions
 
-Your Discord bot needs these permissions:
-- `Ban Members` - To ban users from servers
-- `View Channels` - To access server information
-- `Read Message History` - To process AutoMod events
+Your Discord bot only needs the **Ban Members** permission to function properly.
 
-## Improvements in This Version
+### Quick Add Bot
+[Add Bad Bot to your server](https://discord.com/oauth2/authorize?client_id=1385655724960645200&permissions=4&scope=bot)
 
-- **Webhook URL Validation**: Automatically validates Discord webhook URLs
-- **Token Format Validation**: Checks Discord and OpenAI token formats
-- **Better Error Handling**: Specific handling for OpenAI rate limits and API errors
-- **HTTP Timeouts**: 10-second timeout for webhook requests to prevent hanging
-- **Already-Banned Detection**: Checks if user is already banned before attempting
-- **Permission Verification**: Checks bot permissions on startup
-- **Rate Limiting**: 2-second delays between bans, 1-second between webhooks
-- **Duplicate Prevention**: Tracks processed users to avoid duplicate processing
-- **Configurable Model**: Use any OpenAI model via environment variable
-
-## Troubleshooting
-
-- Check Railway logs for configuration errors
-- Ensure all environment variables are set correctly
-- Verify bot has proper permissions in all servers
-- Make sure webhook URLs are valid and accessible
-- Look for permission warnings in startup logs
-
-## Support
-
-Check Railway logs for any deployment issues. 
+**Required Permission:**
+- `Ban Members` - To ban users from servers 
