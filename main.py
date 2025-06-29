@@ -11,7 +11,7 @@ import aiohttp
 import re
 import time
 import signal
-from typing import Dict, List, Set, Optional
+from typing import Dict, List, Set, Optional, Any
 from dataclasses import dataclass
 from urllib.parse import urlparse
 from collections import deque
@@ -30,6 +30,120 @@ class ServerConfig:
     """Configuration for a Discord server."""
     guild_id: int
     guild_name: str
+
+@dataclass
+class WebhookMessage:
+    """Represents a webhook message in the queue."""
+    webhook_url: str
+    payload: Dict[str, Any]
+    retry_count: int = 0
+    max_retries: int = 3
+
+class WebhookQueue:
+    """Queue system for handling webhook messages with retries and rate limiting."""
+    
+    def __init__(self, session: aiohttp.ClientSession, rate_limiter: 'RateLimiter'):
+        self.queue: deque = deque()
+        self.session = session
+        self.rate_limiter = rate_limiter
+        self.processing = False
+        self.task: Optional[asyncio.Task] = None
+        
+    async def add_webhook_message(self, webhook_url: str, payload: Dict[str, Any]) -> None:
+        """Add a webhook message to the queue."""
+        webhook_msg = WebhookMessage(webhook_url=webhook_url, payload=payload)
+        self.queue.append(webhook_msg)
+        logger.info(f"Added webhook message to queue. Queue size: {len(self.queue)}")
+        
+        # Start processing if not already running
+        if not self.processing:
+            await self.start_processing()
+    
+    async def start_processing(self) -> None:
+        """Start the webhook processing loop."""
+        if self.processing:
+            return
+            
+        self.processing = True
+        self.task = asyncio.create_task(self._process_queue())
+        logger.info("Started webhook queue processing")
+    
+    async def stop_processing(self) -> None:
+        """Stop the webhook processing loop."""
+        self.processing = False
+        if self.task:
+            self.task.cancel()
+            try:
+                await self.task
+            except asyncio.CancelledError:
+                pass
+        logger.info("Stopped webhook queue processing")
+    
+    async def _process_queue(self) -> None:
+        """Process webhook messages in the queue."""
+        logger.info("Starting webhook queue processing loop")
+        while self.processing:
+            if not self.queue:
+                await asyncio.sleep(1)
+                continue
+            
+            # Get next webhook message
+            webhook_msg = self.queue.popleft()
+            logger.info(f"Processing webhook message (queue size: {len(self.queue)})")
+            
+            # Rate limit check
+            await self.rate_limiter.acquire()
+            
+            # Try to send the webhook
+            success = await self._send_webhook_with_retry(webhook_msg)
+            
+            if not success and webhook_msg.retry_count < webhook_msg.max_retries:
+                # Re-queue for retry
+                webhook_msg.retry_count += 1
+                self.queue.append(webhook_msg)
+                logger.info(f"Re-queued webhook message for retry {webhook_msg.retry_count}/{webhook_msg.max_retries}")
+            elif not success:
+                logger.error(f"Webhook failed after {webhook_msg.max_retries} attempts, dropping message")
+            
+            # Wait 10 seconds before processing next webhook
+            logger.info("Waiting 10 seconds before processing next webhook...")
+            await asyncio.sleep(10)
+        
+        logger.info("Webhook queue processing loop stopped")
+    
+    async def _send_webhook_with_retry(self, webhook_msg: WebhookMessage) -> bool:
+        """Send a webhook message with retry logic."""
+        try:
+            async with self.session.post(
+                webhook_msg.webhook_url, 
+                json=webhook_msg.payload, 
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as response:
+                if response.status == 204:
+                    logger.info(f"Webhook sent successfully (attempt {webhook_msg.retry_count + 1})")
+                    return True
+                else:
+                    logger.warning(f"Webhook returned status {response.status} (attempt {webhook_msg.retry_count + 1})")
+                    return False
+                    
+        except asyncio.TimeoutError:
+            logger.error(f"Webhook request timed out (attempt {webhook_msg.retry_count + 1})")
+            return False
+        except Exception as e:
+            logger.error(f"Failed to send webhook (attempt {webhook_msg.retry_count + 1}): {e}")
+            return False
+    
+    def get_queue_size(self) -> int:
+        """Get the current queue size."""
+        return len(self.queue)
+
+    def get_queue_status(self) -> Dict[str, Any]:
+        """Get detailed status of the webhook queue."""
+        return {
+            "queue_size": len(self.queue),
+            "processing": self.processing,
+            "has_task": self.task is not None
+        }
 
 class RateLimiter:
     """Rate limiter for API calls."""
@@ -75,6 +189,9 @@ class BadBotAutoMod:
         
         # Connection pooling
         self.session: Optional[aiohttp.ClientSession] = None
+        
+        # Webhook queue
+        self.webhook_queue: Optional[WebhookQueue] = None
         
         # Graceful shutdown
         self.shutdown_event = asyncio.Event()
@@ -338,13 +455,13 @@ class BadBotAutoMod:
     async def send_webhook_notifications(self, user_id: int, username: str, 
                                        message_content: str, source_guild_name: str,
                                        ban_results: Dict[int, bool]) -> None:
-        """Send notifications to all configured webhooks with connection pooling and rate limiting."""
+        """Add webhook notifications to the queue for processing."""
         if not self.webhook_urls:
             logger.info("No webhook URLs configured, skipping notifications")
             return
             
-        if not self.session:
-            logger.error("HTTP session not initialized")
+        if not self.webhook_queue:
+            logger.error("Webhook queue not initialized")
             return
             
         # Create embed message
@@ -367,31 +484,26 @@ class BadBotAutoMod:
             "timestamp": nextcord.utils.utcnow().isoformat()
         }
         
-        # Send to all webhooks with connection pooling
+        # Add to webhook queue for each webhook URL
         for i, webhook_url in enumerate(self.webhook_urls):
-            # Rate limit check
-            await self.webhook_rate_limiter.acquire()
+            webhook_data = {
+                "username": "BadBot AutoMod",
+                "embeds": [embed_data]
+            }
             
-            try:
-                webhook_data = {
-                    "username": "BadBot AutoMod",
-                    "embeds": [embed_data]
-                }
-                
-                async with self.session.post(webhook_url, json=webhook_data, timeout=aiohttp.ClientTimeout(total=10)) as response:
-                    if response.status == 204:
-                        logger.info(f"Webhook {i+1} notification sent successfully")
-                    else:
-                        logger.warning(f"Webhook {i+1} returned status {response.status}")
-                        
-                # Rate limiting delay
-                await asyncio.sleep(1)
-                
-            except asyncio.TimeoutError:
-                logger.error(f"Webhook {i+1} request timed out")
-            except Exception as e:
-                logger.error(f"Failed to send webhook {i+1} notification: {e}")
-                    
+            await self.webhook_queue.add_webhook_message(webhook_url, webhook_data)
+            logger.info(f"Added webhook {i+1} to queue")
+        
+        # Log queue status
+        queue_status = self.webhook_queue.get_queue_status()
+        logger.info(f"Webhook queue status: {queue_status}")
+
+    def get_webhook_queue_status(self) -> Optional[Dict[str, Any]]:
+        """Get the current status of the webhook queue."""
+        if self.webhook_queue:
+            return self.webhook_queue.get_queue_status()
+        return None
+
     async def handle_automod_event(self, payload: nextcord.AutoModerationActionExecution) -> None:
         """Handle AutoMod action execution events with error recovery."""
         try:
@@ -512,7 +624,7 @@ class BadBotAutoMod:
         return bot
 
     async def setup_session(self):
-        """Setup HTTP session with connection pooling."""
+        """Setup HTTP session with connection pooling and webhook queue."""
         connector = aiohttp.TCPConnector(
             limit=100,  # Total connection pool size
             limit_per_host=30,  # Connections per host
@@ -529,10 +641,20 @@ class BadBotAutoMod:
             headers={'User-Agent': 'BadBot-AutoMod/1.0'}
         )
         logger.info("HTTP session initialized with connection pooling")
+        
+        # Initialize webhook queue
+        self.webhook_queue = WebhookQueue(self.session, self.webhook_rate_limiter)
+        logger.info("Webhook queue initialized")
 
     async def cleanup(self):
         """Cleanup resources."""
         logger.info("Cleaning up resources...")
+        
+        # Stop webhook queue processing
+        if self.webhook_queue:
+            await self.webhook_queue.stop_processing()
+            logger.info(f"Final webhook queue size: {self.webhook_queue.get_queue_size()}")
+        
         if self.session:
             await self.session.close()
         if self.bot:
