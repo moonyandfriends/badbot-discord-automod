@@ -464,6 +464,9 @@ class BadBotAutoMod:
             logger.error("Webhook queue not initialized")
             return
             
+        # Clean up message content - replace line breaks with spaces
+        cleaned_content = message_content.replace('\n', ' ').replace('\r', ' ')
+        
         # Create embed message
         embed_data = {
             "title": "🔨 Scammer Banned",
@@ -471,17 +474,16 @@ class BadBotAutoMod:
             "color": 0xFF0000,  # Red color
             "fields": [
                 {
-                    "name": "**Source Server:**",
+                    "name": "Source Server",
                     "value": source_guild_name,
                     "inline": True
                 },
                 {
-                    "name": "**Scam Message:**",
-                    "value": f"```{message_content[:1000]}```",
+                    "name": "Scam Message",
+                    "value": f"```{cleaned_content[:1000]}```",
                     "inline": False
                 }
-            ],
-            "timestamp": nextcord.utils.utcnow().isoformat()
+            ]
         }
         
         # Add to webhook queue for each webhook URL
@@ -568,12 +570,12 @@ class BadBotAutoMod:
                 # Ban user from all servers
                 ban_results = await self.ban_user_from_all_servers(user_id, "Scam detected by ChatGPT")
                 
-                # Send webhook notifications
+                # Send webhook notifications using server name from configuration
                 await self.send_webhook_notifications(
                     user_id=user_id,
                     username=username,
                     message_content=blocked_content,
-                    source_guild_name=guild.name,
+                    source_guild_name=server_config.guild_name,
                     ban_results=ban_results
                 )
             else:
