@@ -515,7 +515,7 @@ class BadBotAutoMod:
         # Add to webhook queue for each webhook URL
         for i, webhook_url in enumerate(self.webhook_urls):
             webhook_data = {
-                "username": "BadBot AutoMod",
+                "username": "Bad Bot",
                 "embeds": [embed_data]
             }
             
