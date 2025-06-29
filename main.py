@@ -483,12 +483,12 @@ class BadBotAutoMod:
             "color": 0xFF0000,  # Red color
             "fields": [
                 {
-                    "name": "Source Server",
+                    "name": "Source Server:",
                     "value": source_guild_name,
                     "inline": True
                 },
                 {
-                    "name": "Scam Message",
+                    "name": "Scam Message:",
                     "value": f"```{cleaned_content[:1000]}```",
                     "inline": False
                 }
