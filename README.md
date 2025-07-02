@@ -69,6 +69,3 @@ openai_model=gpt-4o-mini
 3. Create a new Railway project from your fork
 4. Set the environment variables in Railway dashboard
 5. Deploy!
-
-**Required Permission:**
-- `Ban Members` - To ban users from servers 
