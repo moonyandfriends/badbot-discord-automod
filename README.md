@@ -23,8 +23,6 @@ A Discord bot that monitors AutoMod events, uses ChatGPT to detect scams, bans u
 
 ## 🤖 Bot Info
 
-Your Discord bot only needs the **Ban Members** permission to function properly.
-
 ### Quick Add Bot
 [Add Bad Bot to your server](https://discord.com/oauth2/authorize?client_id=1385655724960645200&permissions=4&scope=bot)
 
