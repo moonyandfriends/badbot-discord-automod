@@ -105,9 +105,9 @@ class WebhookQueue:
             elif not success:
                 logger.error(f"Webhook failed after {webhook_msg.max_retries} attempts, dropping message")
             
-            # Wait 10 seconds before processing next webhook
-            logger.info("Waiting 10 seconds before processing next webhook...")
-            await asyncio.sleep(10)
+            # Wait 2 seconds before processing next webhook
+            logger.info("Waiting 2 seconds before processing next webhook...")
+            await asyncio.sleep(2)
         
         logger.info("Webhook queue processing loop stopped")
     
