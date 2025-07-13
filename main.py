@@ -470,7 +470,7 @@ class BadBotAutoMod:
         # Create embed message
         embed_data = {
             "title": title,
-            "description": f"**Target:** <@{target_user_id}> ({target_user_id})\n**Moderator:** <@{moderator_id}> ({moderator_username})\n**Server:** {guild_name}",
+            "description": f"**Target:** <@{target_user_id}> ({target_user_id})\n**Moderator:** <@{moderator_id}> ({moderator_id})\n**Server:** {guild_name}",
             "color": color,
             "timestamp": nextcord.utils.utcnow().isoformat()
         }
@@ -557,7 +557,7 @@ class BadBotAutoMod:
         # Create description with originating server info
         description_parts = [
             f"**Target:** <@{target_user_id}> ({target_user_id})",
-            f"**Moderator:** <@{moderator_id}> ({moderator_username})",
+            f"**Moderator:** <@{moderator_id}> ({moderator_id})",
             f"**Result:** {result_text}"
         ]
         
