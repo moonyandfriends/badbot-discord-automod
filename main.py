@@ -497,13 +497,20 @@ class BadBotAutoMod:
 
     async def send_mass_action_webhook_notification(self, action: str, target_user_id: int, target_username: str, 
                                                    moderator_id: int, moderator_username: str, notes: str, 
-                                                   results: Dict[int, bool]) -> None:
+                                                   results: Dict[int, bool], originating_guild_name: str = None) -> None:
         """Send a single webhook notification for mass ban/unban actions with summary."""
         if not self.webhook_urls or not self.webhook_queue:
             return
             
+        # Extract just the user-provided notes (remove prefix like "Mass ban by username: ")
+        if notes and ": " in notes:
+            # Split on first ": " and take everything after it
+            user_notes = notes.split(": ", 1)[1].strip()
+        else:
+            user_notes = notes if notes else "No notes provided"
+        
         # Clean up notes
-        cleaned_notes = notes.replace('\n', ' ').replace('\r', ' ') if notes else "No notes provided"
+        cleaned_notes = user_notes.replace('\n', ' ').replace('\r', ' ')
         
         # Calculate success statistics
         successful_actions = sum(1 for success in results.values() if success)
@@ -544,28 +551,25 @@ class BadBotAutoMod:
                 title = f"{emoji} Mass Unban Failed"
                 result_text = f"**Failed to unban from any servers** (0/{total_servers})"
         
-        # Create server list for detailed results
-        server_list = []
-        for guild_id, success in results.items():
-            server_config = self.servers.get(guild_id)
-            server_name = server_config.guild_name if server_config else f"Server {guild_id}"
-            status = "✅" if success else "❌"
-            server_list.append(f"{status} {server_name}")
+        # Create description with originating server info
+        description_parts = [
+            f"**Target:** <@{target_user_id}> ({target_user_id})",
+            f"**Moderator:** <@{moderator_id}> ({moderator_username})",
+            f"**Result:** {result_text}"
+        ]
+        
+        if originating_guild_name:
+            description_parts.append(f"**Originated in:** {originating_guild_name}")
         
         # Create embed message
         embed_data = {
             "title": title,
-            "description": f"**Target:** <@{target_user_id}> ({target_user_id})\n**Moderator:** <@{moderator_id}> ({moderator_username})\n**Result:** {result_text}",
+            "description": "\n".join(description_parts),
             "color": color,
             "fields": [
                 {
                     "name": "Notes:",
-                    "value": f"```{cleaned_notes[:500]}```",
-                    "inline": False
-                },
-                {
-                    "name": f"Server Results ({total_servers} total):",
-                    "value": "\n".join(server_list[:20]) + ("\n..." if len(server_list) > 20 else ""),
+                    "value": f"```{cleaned_notes[:1000]}```",
                     "inline": False
                 }
             ],
@@ -585,7 +589,7 @@ class BadBotAutoMod:
             
             await self.webhook_queue.add_webhook_message(webhook_url, webhook_data)
 
-    async def mass_ban_user(self, user_id: int, reason: str, moderator_id: int, moderator_username: str) -> Dict[int, bool]:
+    async def mass_ban_user(self, user_id: int, reason: str, moderator_id: int, moderator_username: str, originating_guild_name: str = None) -> Dict[int, bool]:
         """Ban user from all configured servers and log to webhooks."""
         ban_results = {}
         
@@ -653,12 +657,12 @@ class BadBotAutoMod:
         
         # Send single webhook notification with summary
         await self.send_mass_action_webhook_notification(
-            "mass ban", user_id, target_username, moderator_id, moderator_username, reason, ban_results
+            "mass ban", user_id, target_username, moderator_id, moderator_username, reason, ban_results, originating_guild_name
         )
                 
         return ban_results
 
-    async def mass_unban_user(self, user_id: int, reason: str, moderator_id: int, moderator_username: str) -> Dict[int, bool]:
+    async def mass_unban_user(self, user_id: int, reason: str, moderator_id: int, moderator_username: str, originating_guild_name: str = None) -> Dict[int, bool]:
         """Unban user from all configured servers and log to webhooks."""
         unban_results = {}
         
@@ -718,7 +722,7 @@ class BadBotAutoMod:
         
         # Send single webhook notification with summary
         await self.send_mass_action_webhook_notification(
-            "mass unban", user_id, target_username, moderator_id, moderator_username, reason, unban_results
+            "mass unban", user_id, target_username, moderator_id, moderator_username, reason, unban_results, originating_guild_name
         )
                 
         return unban_results
@@ -1203,7 +1207,8 @@ class BadBotAutoMod:
                 target_user_id, 
                 f"Mass ban by {ctx.author.display_name}: {notes}",
                 ctx.author.id,
-                ctx.author.display_name
+                ctx.author.display_name,
+                ctx.guild.name
             )
             
             # Report results
@@ -1239,7 +1244,8 @@ class BadBotAutoMod:
                 target_user_id, 
                 f"Mass unban by {ctx.author.display_name}: {notes}",
                 ctx.author.id,
-                ctx.author.display_name
+                ctx.author.display_name,
+                ctx.guild.name
             )
             
             # Report results
