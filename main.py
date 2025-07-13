@@ -472,15 +472,18 @@ class BadBotAutoMod:
             "title": title,
             "description": f"**Target:** <@{target_user_id}> ({target_user_id})\n**Moderator:** <@{moderator_id}> ({moderator_username})\n**Server:** {guild_name}",
             "color": color,
-            "fields": [
+            "timestamp": nextcord.utils.utcnow().isoformat()
+        }
+        
+        # Only add Notes field if actual notes were provided (not default message)
+        if cleaned_notes and cleaned_notes.lower() != "no notes provided":
+            embed_data["fields"] = [
                 {
                     "name": "Notes:",
                     "value": f"```{cleaned_notes[:1000]}```",
                     "inline": False
                 }
-            ],
-            "timestamp": nextcord.utils.utcnow().isoformat()
-        }
+            ]
         
         # Add to webhook queue for each webhook URL
         for webhook_url in self.webhook_urls:
@@ -566,15 +569,18 @@ class BadBotAutoMod:
             "title": title,
             "description": "\n".join(description_parts),
             "color": color,
-            "fields": [
+            "timestamp": nextcord.utils.utcnow().isoformat()
+        }
+        
+        # Only add Notes field if actual notes were provided (not default message)
+        if cleaned_notes and cleaned_notes.lower() != "no notes provided":
+            embed_data["fields"] = [
                 {
                     "name": "Notes:",
                     "value": f"```{cleaned_notes[:1000]}```",
                     "inline": False
                 }
-            ],
-            "timestamp": nextcord.utils.utcnow().isoformat()
-        }
+            ]
         
         # Add to webhook queue for each webhook URL
         for webhook_url in self.webhook_urls:
