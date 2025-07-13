@@ -495,6 +495,96 @@ class BadBotAutoMod:
             
             await self.webhook_queue.add_webhook_message(webhook_url, webhook_data)
 
+    async def send_mass_action_webhook_notification(self, action: str, target_user_id: int, target_username: str, 
+                                                   moderator_id: int, moderator_username: str, notes: str, 
+                                                   results: Dict[int, bool]) -> None:
+        """Send a single webhook notification for mass ban/unban actions with summary."""
+        if not self.webhook_urls or not self.webhook_queue:
+            return
+            
+        # Clean up notes
+        cleaned_notes = notes.replace('\n', ' ').replace('\r', ' ') if notes else "No notes provided"
+        
+        # Calculate success statistics
+        successful_actions = sum(1 for success in results.values() if success)
+        total_servers = len(results)
+        failed_actions = total_servers - successful_actions
+        
+        # Set color and emoji based on action and results
+        if action.lower() == "mass ban":
+            if successful_actions == total_servers:
+                color = 0xFF0000  # Red for complete success
+                emoji = "🔨"
+                title = f"{emoji} Mass Ban Complete"
+                result_text = f"Successfully banned from **all {total_servers} servers**"
+            elif successful_actions > 0:
+                color = 0xFF8C00  # Orange for partial success
+                emoji = "⚠️"
+                title = f"{emoji} Mass Ban Partial"
+                result_text = f"Banned from **{successful_actions}/{total_servers} servers** ({failed_actions} failed)"
+            else:
+                color = 0x808080  # Gray for complete failure
+                emoji = "❌"
+                title = f"{emoji} Mass Ban Failed"
+                result_text = f"**Failed to ban from any servers** (0/{total_servers})"
+        else:  # mass unban
+            if successful_actions == total_servers:
+                color = 0x00FF00  # Green for complete success
+                emoji = "🔓"
+                title = f"{emoji} Mass Unban Complete"
+                result_text = f"Successfully unbanned from **all {total_servers} servers**"
+            elif successful_actions > 0:
+                color = 0xFF8C00  # Orange for partial success
+                emoji = "⚠️"
+                title = f"{emoji} Mass Unban Partial"
+                result_text = f"Unbanned from **{successful_actions}/{total_servers} servers** ({failed_actions} failed)"
+            else:
+                color = 0x808080  # Gray for complete failure
+                emoji = "❌"
+                title = f"{emoji} Mass Unban Failed"
+                result_text = f"**Failed to unban from any servers** (0/{total_servers})"
+        
+        # Create server list for detailed results
+        server_list = []
+        for guild_id, success in results.items():
+            server_config = self.servers.get(guild_id)
+            server_name = server_config.guild_name if server_config else f"Server {guild_id}"
+            status = "✅" if success else "❌"
+            server_list.append(f"{status} {server_name}")
+        
+        # Create embed message
+        embed_data = {
+            "title": title,
+            "description": f"**Target:** <@{target_user_id}> ({target_user_id})\n**Moderator:** <@{moderator_id}> ({moderator_username})\n**Result:** {result_text}",
+            "color": color,
+            "fields": [
+                {
+                    "name": "Notes:",
+                    "value": f"```{cleaned_notes[:500]}```",
+                    "inline": False
+                },
+                {
+                    "name": f"Server Results ({total_servers} total):",
+                    "value": "\n".join(server_list[:20]) + ("\n..." if len(server_list) > 20 else ""),
+                    "inline": False
+                }
+            ],
+            "timestamp": nextcord.utils.utcnow().isoformat()
+        }
+        
+        # Add to webhook queue for each webhook URL
+        for webhook_url in self.webhook_urls:
+            webhook_data = {
+                "username": "Bad Bot - Mass Moderation",
+                "embeds": [embed_data]
+            }
+            
+            # Add avatar URL if valid
+            if self.webhook_avatar_url and self.validate_avatar_url(self.webhook_avatar_url):
+                webhook_data["avatar_url"] = self.webhook_avatar_url
+            
+            await self.webhook_queue.add_webhook_message(webhook_url, webhook_data)
+
     async def mass_ban_user(self, user_id: int, reason: str, moderator_id: int, moderator_username: str) -> Dict[int, bool]:
         """Ban user from all configured servers and log to webhooks."""
         ban_results = {}
@@ -523,10 +613,6 @@ class BadBotAutoMod:
             if not guild:
                 logger.warning(f"Could not find guild {server_config.guild_name} ({guild_id})")
                 ban_results[guild_id] = False
-                await self.send_ban_webhook_notification(
-                    "ban", user_id, target_username, moderator_id, moderator_username,
-                    server_config.guild_name, reason, success=False
-                )
                 continue
                 
             try:
@@ -536,10 +622,6 @@ class BadBotAutoMod:
                     if ban_entry:
                         logger.info(f"User {user_id} already banned in {server_config.guild_name}")
                         ban_results[guild_id] = True
-                        await self.send_ban_webhook_notification(
-                            "ban", user_id, target_username, moderator_id, moderator_username,
-                            server_config.guild_name, f"{reason} (already banned)", success=True
-                        )
                         continue
                 except nextcord.NotFound:
                     pass
@@ -555,12 +637,6 @@ class BadBotAutoMod:
                 
                 logger.info(f"Mass banned user {user_id} from {server_config.guild_name}")
                 ban_results[guild_id] = True
-                
-                # Send success webhook
-                await self.send_ban_webhook_notification(
-                    "ban", user_id, target_username, moderator_id, moderator_username,
-                    server_config.guild_name, reason, success=True
-                )
                     
                 # Rate limiting delay
                 await asyncio.sleep(2)
@@ -568,24 +644,17 @@ class BadBotAutoMod:
             except nextcord.Forbidden:
                 logger.error(f"No permission to ban in {server_config.guild_name}")
                 ban_results[guild_id] = False
-                await self.send_ban_webhook_notification(
-                    "ban", user_id, target_username, moderator_id, moderator_username,
-                    server_config.guild_name, f"{reason} (no permission)", success=False
-                )
             except nextcord.HTTPException as e:
                 logger.error(f"HTTP error mass banning user {user_id} from {server_config.guild_name}: {e}")
                 ban_results[guild_id] = False
-                await self.send_ban_webhook_notification(
-                    "ban", user_id, target_username, moderator_id, moderator_username,
-                    server_config.guild_name, f"{reason} (HTTP error: {e})", success=False
-                )
             except Exception as e:
                 logger.error(f"Unexpected error mass banning user {user_id} from {server_config.guild_name}: {e}")
                 ban_results[guild_id] = False
-                await self.send_ban_webhook_notification(
-                    "ban", user_id, target_username, moderator_id, moderator_username,
-                    server_config.guild_name, f"{reason} (error: {e})", success=False
-                )
+        
+        # Send single webhook notification with summary
+        await self.send_mass_action_webhook_notification(
+            "mass ban", user_id, target_username, moderator_id, moderator_username, reason, ban_results
+        )
                 
         return ban_results
 
@@ -612,10 +681,6 @@ class BadBotAutoMod:
             if not guild:
                 logger.warning(f"Could not find guild {server_config.guild_name} ({guild_id})")
                 unban_results[guild_id] = False
-                await self.send_ban_webhook_notification(
-                    "unban", user_id, target_username, moderator_id, moderator_username,
-                    server_config.guild_name, reason, success=False
-                )
                 continue
                 
             try:
@@ -625,18 +690,10 @@ class BadBotAutoMod:
                     if not ban_entry:
                         logger.info(f"User {user_id} not banned in {server_config.guild_name}")
                         unban_results[guild_id] = True
-                        await self.send_ban_webhook_notification(
-                            "unban", user_id, target_username, moderator_id, moderator_username,
-                            server_config.guild_name, f"{reason} (not banned)", success=True
-                        )
                         continue
                 except nextcord.NotFound:
                     logger.info(f"User {user_id} not banned in {server_config.guild_name}")
                     unban_results[guild_id] = True
-                    await self.send_ban_webhook_notification(
-                        "unban", user_id, target_username, moderator_id, moderator_username,
-                        server_config.guild_name, f"{reason} (not banned)", success=True
-                    )
                     continue
                 
                 # Unban the user
@@ -645,12 +702,6 @@ class BadBotAutoMod:
                 
                 logger.info(f"Mass unbanned user {user_id} from {server_config.guild_name}")
                 unban_results[guild_id] = True
-                
-                # Send success webhook
-                await self.send_ban_webhook_notification(
-                    "unban", user_id, target_username, moderator_id, moderator_username,
-                    server_config.guild_name, reason, success=True
-                )
                     
                 # Rate limiting delay
                 await asyncio.sleep(2)
@@ -658,24 +709,17 @@ class BadBotAutoMod:
             except nextcord.Forbidden:
                 logger.error(f"No permission to unban in {server_config.guild_name}")
                 unban_results[guild_id] = False
-                await self.send_ban_webhook_notification(
-                    "unban", user_id, target_username, moderator_id, moderator_username,
-                    server_config.guild_name, f"{reason} (no permission)", success=False
-                )
             except nextcord.HTTPException as e:
                 logger.error(f"HTTP error mass unbanning user {user_id} from {server_config.guild_name}: {e}")
                 unban_results[guild_id] = False
-                await self.send_ban_webhook_notification(
-                    "unban", user_id, target_username, moderator_id, moderator_username,
-                    server_config.guild_name, f"{reason} (HTTP error: {e})", success=False
-                )
             except Exception as e:
                 logger.error(f"Unexpected error mass unbanning user {user_id} from {server_config.guild_name}: {e}")
                 unban_results[guild_id] = False
-                await self.send_ban_webhook_notification(
-                    "unban", user_id, target_username, moderator_id, moderator_username,
-                    server_config.guild_name, f"{reason} (error: {e})", success=False
-                )
+        
+        # Send single webhook notification with summary
+        await self.send_mass_action_webhook_notification(
+            "mass unban", user_id, target_username, moderator_id, moderator_username, reason, unban_results
+        )
                 
         return unban_results
 
