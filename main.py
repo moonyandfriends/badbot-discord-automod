@@ -181,6 +181,7 @@ class BadBotAutoMod:
         self.openai_client = None
         self.processed_users: deque = deque(maxlen=1000)  # Prevent memory leaks
         self.openai_model = "gpt-4o-mini"  # Default model
+        self.authorized_users: Set[int] = set()  # Users authorized to use ban/unban commands
         
         # Rate limiters
         self.discord_rate_limiter = RateLimiter(max_calls=50, time_window=60)  # 50 calls per minute
@@ -298,6 +299,26 @@ class BadBotAutoMod:
         # Load optional OpenAI model
         self.openai_model = os.environ.get("openai_model", "gpt-4o-mini")
         logger.info(f"Using OpenAI model: {self.openai_model}")
+        
+        # Load authorized users for ban/unban commands
+        authorized_users_env = os.environ.get("badbot_authorized_users")
+        if authorized_users_env:
+            # Parse comma-separated user IDs
+            user_ids = [uid.strip() for uid in authorized_users_env.split(',') if uid.strip()]
+            for user_id_str in user_ids:
+                try:
+                    user_id = int(user_id_str)
+                    self.authorized_users.add(user_id)
+                    logger.info(f"Authorized user: {user_id}")
+                except ValueError:
+                    logger.warning(f"Invalid user ID format: {user_id_str}")
+            
+            if self.authorized_users:
+                logger.info(f"Loaded {len(self.authorized_users)} authorized users for ban/unban commands")
+            else:
+                logger.warning("No valid authorized users found. Ban/unban commands will be disabled.")
+        else:
+            logger.warning("badbot_authorized_users environment variable not set. Ban/unban commands will be disabled.")
         
     def load_credentials(self) -> str:
         """Load Discord token and OpenAI key from environment variables."""
@@ -421,6 +442,371 @@ class BadBotAutoMod:
         
         logger.info(f"User {user_id} has {total_posts} total posts across all accessible servers")
         return total_posts
+
+    def is_authorized_user(self, user_id: int) -> bool:
+        """Check if a user is authorized to use ban/unban commands."""
+        return user_id in self.authorized_users
+
+    async def send_ban_webhook_notification(self, action: str, target_user_id: int, target_username: str, 
+                                          moderator_id: int, moderator_username: str, guild_name: str, 
+                                          notes: str, success: bool = True) -> None:
+        """Send webhook notification for ban/unban actions."""
+        if not self.webhook_urls or not self.webhook_queue:
+            return
+            
+        # Clean up notes - replace line breaks with spaces
+        cleaned_notes = notes.replace('\n', ' ').replace('\r', ' ') if notes else "No notes provided"
+        
+        # Set color based on action and success
+        if action.lower() == "ban":
+            color = 0xFF0000 if success else 0xFF8C00  # Red for successful ban, orange for failed
+            emoji = "🔨" if success else "⚠️"
+            title = f"{emoji} User {'Banned' if success else 'Ban Failed'}"
+        else:  # unban
+            color = 0x00FF00 if success else 0xFF8C00  # Green for successful unban, orange for failed
+            emoji = "🔓" if success else "⚠️"
+            title = f"{emoji} User {'Unbanned' if success else 'Unban Failed'}"
+        
+        # Create embed message
+        embed_data = {
+            "title": title,
+            "description": f"**Target:** <@{target_user_id}> ({target_user_id})\n**Moderator:** <@{moderator_id}> ({moderator_username})\n**Server:** {guild_name}",
+            "color": color,
+            "fields": [
+                {
+                    "name": "Notes:",
+                    "value": f"```{cleaned_notes[:1000]}```",
+                    "inline": False
+                }
+            ],
+            "timestamp": nextcord.utils.utcnow().isoformat()
+        }
+        
+        # Add to webhook queue for each webhook URL
+        for webhook_url in self.webhook_urls:
+            webhook_data = {
+                "username": "Bad Bot - Moderation",
+                "embeds": [embed_data]
+            }
+            
+            # Add avatar URL if valid
+            if self.webhook_avatar_url and self.validate_avatar_url(self.webhook_avatar_url):
+                webhook_data["avatar_url"] = self.webhook_avatar_url
+            
+            await self.webhook_queue.add_webhook_message(webhook_url, webhook_data)
+
+    async def mass_ban_user(self, user_id: int, reason: str, moderator_id: int, moderator_username: str) -> Dict[int, bool]:
+        """Ban user from all configured servers and log to webhooks."""
+        ban_results = {}
+        
+        if not self.bot:
+            logger.error("Bot not initialized")
+            return ban_results
+        
+        # Get target user info
+        try:
+            target_user = await self.bot.fetch_user(user_id)
+            target_username = target_user.display_name if target_user else f"Unknown User ({user_id})"
+        except:
+            target_username = f"Unknown User ({user_id})"
+        
+        for guild_id, server_config in self.servers.items():
+            # Rate limit check
+            await self.discord_rate_limiter.acquire()
+            
+            guild = self.bot.get_guild(guild_id)
+            if not guild:
+                logger.warning(f"Could not find guild {server_config.guild_name} ({guild_id})")
+                ban_results[guild_id] = False
+                await self.send_ban_webhook_notification(
+                    "ban", user_id, target_username, moderator_id, moderator_username,
+                    server_config.guild_name, reason, success=False
+                )
+                continue
+                
+            try:
+                # Check if user is already banned
+                try:
+                    ban_entry = await guild.fetch_ban(nextcord.Object(user_id))
+                    if ban_entry:
+                        logger.info(f"User {user_id} already banned in {server_config.guild_name}")
+                        ban_results[guild_id] = True
+                        await self.send_ban_webhook_notification(
+                            "ban", user_id, target_username, moderator_id, moderator_username,
+                            server_config.guild_name, f"{reason} (already banned)", success=True
+                        )
+                        continue
+                except nextcord.NotFound:
+                    pass
+                
+                # Get member object and ban
+                member = guild.get_member(user_id)
+                if member:
+                    await guild.ban(member, reason=reason, delete_message_days=1)
+                else:
+                    # Try to ban by user ID even if not a member
+                    user_obj = await self.bot.fetch_user(user_id)
+                    await guild.ban(user_obj, reason=reason, delete_message_days=1)
+                
+                logger.info(f"Mass banned user {user_id} from {server_config.guild_name}")
+                ban_results[guild_id] = True
+                
+                # Send success webhook
+                await self.send_ban_webhook_notification(
+                    "ban", user_id, target_username, moderator_id, moderator_username,
+                    server_config.guild_name, reason, success=True
+                )
+                    
+                # Rate limiting delay
+                await asyncio.sleep(2)
+                
+            except nextcord.Forbidden:
+                logger.error(f"No permission to ban in {server_config.guild_name}")
+                ban_results[guild_id] = False
+                await self.send_ban_webhook_notification(
+                    "ban", user_id, target_username, moderator_id, moderator_username,
+                    server_config.guild_name, f"{reason} (no permission)", success=False
+                )
+            except nextcord.HTTPException as e:
+                logger.error(f"HTTP error mass banning user {user_id} from {server_config.guild_name}: {e}")
+                ban_results[guild_id] = False
+                await self.send_ban_webhook_notification(
+                    "ban", user_id, target_username, moderator_id, moderator_username,
+                    server_config.guild_name, f"{reason} (HTTP error: {e})", success=False
+                )
+            except Exception as e:
+                logger.error(f"Unexpected error mass banning user {user_id} from {server_config.guild_name}: {e}")
+                ban_results[guild_id] = False
+                await self.send_ban_webhook_notification(
+                    "ban", user_id, target_username, moderator_id, moderator_username,
+                    server_config.guild_name, f"{reason} (error: {e})", success=False
+                )
+                
+        return ban_results
+
+    async def mass_unban_user(self, user_id: int, reason: str, moderator_id: int, moderator_username: str) -> Dict[int, bool]:
+        """Unban user from all configured servers and log to webhooks."""
+        unban_results = {}
+        
+        if not self.bot:
+            logger.error("Bot not initialized")
+            return unban_results
+        
+        # Get target user info
+        try:
+            target_user = await self.bot.fetch_user(user_id)
+            target_username = target_user.display_name if target_user else f"Unknown User ({user_id})"
+        except:
+            target_username = f"Unknown User ({user_id})"
+        
+        for guild_id, server_config in self.servers.items():
+            # Rate limit check
+            await self.discord_rate_limiter.acquire()
+            
+            guild = self.bot.get_guild(guild_id)
+            if not guild:
+                logger.warning(f"Could not find guild {server_config.guild_name} ({guild_id})")
+                unban_results[guild_id] = False
+                await self.send_ban_webhook_notification(
+                    "unban", user_id, target_username, moderator_id, moderator_username,
+                    server_config.guild_name, reason, success=False
+                )
+                continue
+                
+            try:
+                # Check if user is actually banned
+                try:
+                    ban_entry = await guild.fetch_ban(nextcord.Object(user_id))
+                    if not ban_entry:
+                        logger.info(f"User {user_id} not banned in {server_config.guild_name}")
+                        unban_results[guild_id] = True
+                        await self.send_ban_webhook_notification(
+                            "unban", user_id, target_username, moderator_id, moderator_username,
+                            server_config.guild_name, f"{reason} (not banned)", success=True
+                        )
+                        continue
+                except nextcord.NotFound:
+                    logger.info(f"User {user_id} not banned in {server_config.guild_name}")
+                    unban_results[guild_id] = True
+                    await self.send_ban_webhook_notification(
+                        "unban", user_id, target_username, moderator_id, moderator_username,
+                        server_config.guild_name, f"{reason} (not banned)", success=True
+                    )
+                    continue
+                
+                # Unban the user
+                user_obj = await self.bot.fetch_user(user_id)
+                await guild.unban(user_obj, reason=reason)
+                
+                logger.info(f"Mass unbanned user {user_id} from {server_config.guild_name}")
+                unban_results[guild_id] = True
+                
+                # Send success webhook
+                await self.send_ban_webhook_notification(
+                    "unban", user_id, target_username, moderator_id, moderator_username,
+                    server_config.guild_name, reason, success=True
+                )
+                    
+                # Rate limiting delay
+                await asyncio.sleep(2)
+                
+            except nextcord.Forbidden:
+                logger.error(f"No permission to unban in {server_config.guild_name}")
+                unban_results[guild_id] = False
+                await self.send_ban_webhook_notification(
+                    "unban", user_id, target_username, moderator_id, moderator_username,
+                    server_config.guild_name, f"{reason} (no permission)", success=False
+                )
+            except nextcord.HTTPException as e:
+                logger.error(f"HTTP error mass unbanning user {user_id} from {server_config.guild_name}: {e}")
+                unban_results[guild_id] = False
+                await self.send_ban_webhook_notification(
+                    "unban", user_id, target_username, moderator_id, moderator_username,
+                    server_config.guild_name, f"{reason} (HTTP error: {e})", success=False
+                )
+            except Exception as e:
+                logger.error(f"Unexpected error mass unbanning user {user_id} from {server_config.guild_name}: {e}")
+                unban_results[guild_id] = False
+                await self.send_ban_webhook_notification(
+                    "unban", user_id, target_username, moderator_id, moderator_username,
+                    server_config.guild_name, f"{reason} (error: {e})", success=False
+                )
+                
+        return unban_results
+
+    async def single_ban_user(self, user_id: int, guild: nextcord.Guild, reason: str, moderator_id: int, moderator_username: str) -> bool:
+        """Ban user from a single server and log to webhooks."""
+        # Rate limit check
+        await self.discord_rate_limiter.acquire()
+        
+        # Get target user info
+        try:
+            target_user = await self.bot.fetch_user(user_id)
+            target_username = target_user.display_name if target_user else f"Unknown User ({user_id})"
+        except:
+            target_username = f"Unknown User ({user_id})"
+        
+        try:
+            # Check if user is already banned
+            try:
+                ban_entry = await guild.fetch_ban(nextcord.Object(user_id))
+                if ban_entry:
+                    logger.info(f"User {user_id} already banned in {guild.name}")
+                    await self.send_ban_webhook_notification(
+                        "ban", user_id, target_username, moderator_id, moderator_username,
+                        guild.name, f"{reason} (already banned)", success=True
+                    )
+                    return True
+            except nextcord.NotFound:
+                pass
+            
+            # Get member object and ban
+            member = guild.get_member(user_id)
+            if member:
+                await guild.ban(member, reason=reason, delete_message_days=1)
+            else:
+                # Try to ban by user ID even if not a member
+                user_obj = await self.bot.fetch_user(user_id)
+                await guild.ban(user_obj, reason=reason, delete_message_days=1)
+            
+            logger.info(f"Banned user {user_id} from {guild.name}")
+            
+            # Send success webhook
+            await self.send_ban_webhook_notification(
+                "ban", user_id, target_username, moderator_id, moderator_username,
+                guild.name, reason, success=True
+            )
+            
+            return True
+                
+        except nextcord.Forbidden:
+            logger.error(f"No permission to ban in {guild.name}")
+            await self.send_ban_webhook_notification(
+                "ban", user_id, target_username, moderator_id, moderator_username,
+                guild.name, f"{reason} (no permission)", success=False
+            )
+            return False
+        except nextcord.HTTPException as e:
+            logger.error(f"HTTP error banning user {user_id} from {guild.name}: {e}")
+            await self.send_ban_webhook_notification(
+                "ban", user_id, target_username, moderator_id, moderator_username,
+                guild.name, f"{reason} (HTTP error: {e})", success=False
+            )
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error banning user {user_id} from {guild.name}: {e}")
+            await self.send_ban_webhook_notification(
+                "ban", user_id, target_username, moderator_id, moderator_username,
+                guild.name, f"{reason} (error: {e})", success=False
+            )
+            return False
+
+    async def single_unban_user(self, user_id: int, guild: nextcord.Guild, reason: str, moderator_id: int, moderator_username: str) -> bool:
+        """Unban user from a single server and log to webhooks."""
+        # Rate limit check
+        await self.discord_rate_limiter.acquire()
+        
+        # Get target user info
+        try:
+            target_user = await self.bot.fetch_user(user_id)
+            target_username = target_user.display_name if target_user else f"Unknown User ({user_id})"
+        except:
+            target_username = f"Unknown User ({user_id})"
+        
+        try:
+            # Check if user is actually banned
+            try:
+                ban_entry = await guild.fetch_ban(nextcord.Object(user_id))
+                if not ban_entry:
+                    logger.info(f"User {user_id} not banned in {guild.name}")
+                    await self.send_ban_webhook_notification(
+                        "unban", user_id, target_username, moderator_id, moderator_username,
+                        guild.name, f"{reason} (not banned)", success=True
+                    )
+                    return True
+            except nextcord.NotFound:
+                logger.info(f"User {user_id} not banned in {guild.name}")
+                await self.send_ban_webhook_notification(
+                    "unban", user_id, target_username, moderator_id, moderator_username,
+                    guild.name, f"{reason} (not banned)", success=True
+                )
+                return True
+            
+            # Unban the user
+            user_obj = await self.bot.fetch_user(user_id)
+            await guild.unban(user_obj, reason=reason)
+            
+            logger.info(f"Unbanned user {user_id} from {guild.name}")
+            
+            # Send success webhook
+            await self.send_ban_webhook_notification(
+                "unban", user_id, target_username, moderator_id, moderator_username,
+                guild.name, reason, success=True
+            )
+            
+            return True
+                
+        except nextcord.Forbidden:
+            logger.error(f"No permission to unban in {guild.name}")
+            await self.send_ban_webhook_notification(
+                "unban", user_id, target_username, moderator_id, moderator_username,
+                guild.name, f"{reason} (no permission)", success=False
+            )
+            return False
+        except nextcord.HTTPException as e:
+            logger.error(f"HTTP error unbanning user {user_id} from {guild.name}: {e}")
+            await self.send_ban_webhook_notification(
+                "unban", user_id, target_username, moderator_id, moderator_username,
+                guild.name, f"{reason} (HTTP error: {e})", success=False
+            )
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error unbanning user {user_id} from {guild.name}: {e}")
+            await self.send_ban_webhook_notification(
+                "unban", user_id, target_username, moderator_id, moderator_username,
+                guild.name, f"{reason} (error: {e})", success=False
+            )
+            return False
 
     @backoff.on_exception(backoff.expo, (openai.RateLimitError, openai.APIError), max_tries=3)
     async def check_gpt_for_scam(self, content: str) -> bool:
@@ -724,6 +1110,151 @@ class BadBotAutoMod:
         @bot.event
         async def on_error(event, *args, **kwargs):
             logger.error(f"Bot error in event {event}: {args}")
+
+        # Add ban/unban commands
+        @bot.command(name='mban')
+        async def mass_ban_command(ctx, user_id: str, *, notes: str = "No notes provided"):
+            """Mass ban a user from all servers. Usage: ?mban <user_id> <notes>"""
+            # Check if user is authorized
+            if not self.is_authorized_user(ctx.author.id):
+                await ctx.send("❌ You are not authorized to use this command.")
+                return
+            
+            # Validate user ID
+            try:
+                target_user_id = int(user_id)
+            except ValueError:
+                await ctx.send("❌ Invalid user ID format. Please provide a valid Discord user ID.")
+                return
+            
+            # Prevent self-bans
+            if target_user_id == ctx.author.id:
+                await ctx.send("❌ You cannot ban yourself.")
+                return
+            
+            await ctx.send(f"⏳ Mass banning user {target_user_id} from all servers...")
+            
+            # Execute mass ban
+            ban_results = await self.mass_ban_user(
+                target_user_id, 
+                f"Mass ban by {ctx.author.display_name}: {notes}",
+                ctx.author.id,
+                ctx.author.display_name
+            )
+            
+            # Report results
+            successful_bans = sum(1 for success in ban_results.values() if success)
+            total_servers = len(ban_results)
+            
+            if successful_bans == total_servers:
+                await ctx.send(f"✅ Successfully banned user {target_user_id} from all {total_servers} servers.")
+            elif successful_bans > 0:
+                await ctx.send(f"⚠️ Banned user {target_user_id} from {successful_bans}/{total_servers} servers. Check logs for details.")
+            else:
+                await ctx.send(f"❌ Failed to ban user {target_user_id} from any servers. Check logs for details.")
+
+        @bot.command(name='munban')
+        async def mass_unban_command(ctx, user_id: str, *, notes: str = "No notes provided"):
+            """Mass unban a user from all servers. Usage: ?munban <user_id> <notes>"""
+            # Check if user is authorized
+            if not self.is_authorized_user(ctx.author.id):
+                await ctx.send("❌ You are not authorized to use this command.")
+                return
+            
+            # Validate user ID
+            try:
+                target_user_id = int(user_id)
+            except ValueError:
+                await ctx.send("❌ Invalid user ID format. Please provide a valid Discord user ID.")
+                return
+            
+            await ctx.send(f"⏳ Mass unbanning user {target_user_id} from all servers...")
+            
+            # Execute mass unban
+            unban_results = await self.mass_unban_user(
+                target_user_id, 
+                f"Mass unban by {ctx.author.display_name}: {notes}",
+                ctx.author.id,
+                ctx.author.display_name
+            )
+            
+            # Report results
+            successful_unbans = sum(1 for success in unban_results.values() if success)
+            total_servers = len(unban_results)
+            
+            if successful_unbans == total_servers:
+                await ctx.send(f"✅ Successfully unbanned user {target_user_id} from all {total_servers} servers.")
+            elif successful_unbans > 0:
+                await ctx.send(f"⚠️ Unbanned user {target_user_id} from {successful_unbans}/{total_servers} servers. Check logs for details.")
+            else:
+                await ctx.send(f"❌ Failed to unban user {target_user_id} from any servers. Check logs for details.")
+
+        @bot.command(name='ban')
+        async def ban_command(ctx, user_id: str, *, notes: str = "No notes provided"):
+            """Ban a user from the current server. Usage: ?ban <user_id> <notes>"""
+            # Check if user is authorized
+            if not self.is_authorized_user(ctx.author.id):
+                await ctx.send("❌ You are not authorized to use this command.")
+                return
+            
+            # Validate user ID
+            try:
+                target_user_id = int(user_id)
+            except ValueError:
+                await ctx.send("❌ Invalid user ID format. Please provide a valid Discord user ID.")
+                return
+            
+            # Prevent self-bans
+            if target_user_id == ctx.author.id:
+                await ctx.send("❌ You cannot ban yourself.")
+                return
+            
+            await ctx.send(f"⏳ Banning user {target_user_id} from {ctx.guild.name}...")
+            
+            # Execute single server ban
+            success = await self.single_ban_user(
+                target_user_id,
+                ctx.guild,
+                f"Ban by {ctx.author.display_name}: {notes}",
+                ctx.author.id,
+                ctx.author.display_name
+            )
+            
+            if success:
+                await ctx.send(f"✅ Successfully banned user {target_user_id} from {ctx.guild.name}.")
+            else:
+                await ctx.send(f"❌ Failed to ban user {target_user_id} from {ctx.guild.name}. Check logs for details.")
+
+        @bot.command(name='unban')
+        async def unban_command(ctx, user_id: str, *, notes: str = "No notes provided"):
+            """Unban a user from the current server. Usage: ?unban <user_id> <notes>"""
+            # Check if user is authorized
+            if not self.is_authorized_user(ctx.author.id):
+                await ctx.send("❌ You are not authorized to use this command.")
+                return
+            
+            # Validate user ID
+            try:
+                target_user_id = int(user_id)
+            except ValueError:
+                await ctx.send("❌ Invalid user ID format. Please provide a valid Discord user ID.")
+                return
+            
+            await ctx.send(f"⏳ Unbanning user {target_user_id} from {ctx.guild.name}...")
+            
+            # Execute single server unban
+            success = await self.single_unban_user(
+                target_user_id,
+                ctx.guild,
+                f"Unban by {ctx.author.display_name}: {notes}",
+                ctx.author.id,
+                ctx.author.display_name
+            )
+            
+            if success:
+                await ctx.send(f"✅ Successfully unbanned user {target_user_id} from {ctx.guild.name}.")
+            else:
+                await ctx.send(f"❌ Failed to unban user {target_user_id} from {ctx.guild.name}. Check logs for details.")
         
         return bot
 
