@@ -362,6 +362,66 @@ class BadBotAutoMod:
         
         return discord_token
 
+    async def check_user_post_count(self, user_id: int, guild: nextcord.Guild) -> int:
+        """Check how many messages a user has posted across all accessible channels in a guild."""
+        try:
+            member = guild.get_member(user_id)
+            if not member:
+                logger.info(f"User {user_id} is not a member of {guild.name}")
+                return 0
+            
+            total_posts = 0
+            
+            # Check accessible text channels
+            for channel in guild.text_channels:
+                try:
+                    # Check if bot can read message history in this channel
+                    if not channel.permissions_for(guild.me).read_message_history:
+                        continue
+                    
+                    # Count user's messages in this channel (limit to recent messages for performance)
+                    async for message in channel.history(limit=100):
+                        if message.author.id == user_id:
+                            total_posts += 1
+                            
+                            # Early exit if we've found enough posts
+                            if total_posts > 6:
+                                logger.info(f"User {user_id} has >6 posts in {guild.name}, stopping count at {total_posts}")
+                                return total_posts
+                                
+                except (nextcord.Forbidden, nextcord.HTTPException) as e:
+                    # Skip channels we can't access
+                    logger.debug(f"Cannot access channel {channel.name}: {e}")
+                    continue
+            
+            logger.info(f"User {user_id} has {total_posts} posts in {guild.name}")
+            return total_posts
+            
+        except Exception as e:
+            logger.error(f"Error checking post count for user {user_id} in {guild.name}: {e}")
+            return 0
+
+    async def check_user_post_count_across_servers(self, user_id: int) -> int:
+        """Check user's total post count across all accessible servers."""
+        if not self.bot:
+            return 0
+        
+        total_posts = 0
+        
+        for guild_id in self.servers.keys():
+            guild = self.bot.get_guild(guild_id)
+            if guild:
+                posts_in_guild = await self.check_user_post_count(user_id, guild)
+                total_posts += posts_in_guild
+                
+                # Early exit if we've found enough posts
+                if total_posts > 6:
+                    logger.info(f"User {user_id} has >6 total posts across servers, stopping count at {total_posts}")
+                    return total_posts
+        
+        logger.info(f"User {user_id} has {total_posts} total posts across all accessible servers")
+        return total_posts
+
     @backoff.on_exception(backoff.expo, (openai.RateLimitError, openai.APIError), max_tries=3)
     async def check_gpt_for_scam(self, content: str) -> bool:
         """Check if content is a scam using ChatGPT with retry logic."""
@@ -590,6 +650,15 @@ class BadBotAutoMod:
                 return
                 
             logger.info(f"Analyzing content from {username}: {blocked_content[:100]}...")
+            
+            # Check user's post count across all servers before querying ChatGPT
+            user_post_count = await self.check_user_post_count_across_servers(user_id)
+            
+            if user_post_count > 6:
+                logger.info(f"User {username} ({user_id}) has {user_post_count} posts across servers. Skipping ChatGPT analysis - likely not a scammer.")
+                return
+            
+            logger.info(f"User {username} ({user_id}) has only {user_post_count} posts. Proceeding with ChatGPT analysis.")
             
             # Check with ChatGPT
             is_scam = await self.check_gpt_for_scam(blocked_content)
