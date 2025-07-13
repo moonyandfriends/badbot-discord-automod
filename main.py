@@ -743,12 +743,16 @@ class BadBotAutoMod:
         # Rate limit check
         await self.discord_rate_limiter.acquire()
         
-        # Get target user info
+        # Get target user info and configured server name
         try:
             target_user = await self.bot.fetch_user(user_id)
             target_username = target_user.display_name if target_user else f"Unknown User ({user_id})"
         except:
             target_username = f"Unknown User ({user_id})"
+        
+        # Get configured server name for webhook
+        server_config = self.servers.get(guild.id)
+        server_display_name = server_config.guild_name if server_config else guild.name
         
         try:
             # Check if user is already banned
@@ -758,7 +762,7 @@ class BadBotAutoMod:
                     logger.info(f"User {user_id} already banned in {guild.name}")
                     await self.send_ban_webhook_notification(
                         "ban", user_id, target_username, moderator_id, moderator_username,
-                        guild.name, f"{reason} (already banned)", success=True
+                        server_display_name, f"{reason} (already banned)", success=True
                     )
                     return True
             except nextcord.NotFound:
@@ -778,7 +782,7 @@ class BadBotAutoMod:
             # Send success webhook
             await self.send_ban_webhook_notification(
                 "ban", user_id, target_username, moderator_id, moderator_username,
-                guild.name, reason, success=True
+                server_display_name, reason, success=True
             )
             
             return True
@@ -787,21 +791,21 @@ class BadBotAutoMod:
             logger.error(f"No permission to ban in {guild.name}")
             await self.send_ban_webhook_notification(
                 "ban", user_id, target_username, moderator_id, moderator_username,
-                guild.name, f"{reason} (no permission)", success=False
+                server_display_name, f"{reason} (no permission)", success=False
             )
             return False
         except nextcord.HTTPException as e:
             logger.error(f"HTTP error banning user {user_id} from {guild.name}: {e}")
             await self.send_ban_webhook_notification(
                 "ban", user_id, target_username, moderator_id, moderator_username,
-                guild.name, f"{reason} (HTTP error: {e})", success=False
+                server_display_name, f"{reason} (HTTP error: {e})", success=False
             )
             return False
         except Exception as e:
             logger.error(f"Unexpected error banning user {user_id} from {guild.name}: {e}")
             await self.send_ban_webhook_notification(
                 "ban", user_id, target_username, moderator_id, moderator_username,
-                guild.name, f"{reason} (error: {e})", success=False
+                server_display_name, f"{reason} (error: {e})", success=False
             )
             return False
 
@@ -810,12 +814,16 @@ class BadBotAutoMod:
         # Rate limit check
         await self.discord_rate_limiter.acquire()
         
-        # Get target user info
+        # Get target user info and configured server name
         try:
             target_user = await self.bot.fetch_user(user_id)
             target_username = target_user.display_name if target_user else f"Unknown User ({user_id})"
         except:
             target_username = f"Unknown User ({user_id})"
+        
+        # Get configured server name for webhook
+        server_config = self.servers.get(guild.id)
+        server_display_name = server_config.guild_name if server_config else guild.name
         
         try:
             # Check if user is actually banned
@@ -825,14 +833,14 @@ class BadBotAutoMod:
                     logger.info(f"User {user_id} not banned in {guild.name}")
                     await self.send_ban_webhook_notification(
                         "unban", user_id, target_username, moderator_id, moderator_username,
-                        guild.name, f"{reason} (not banned)", success=True
+                        server_display_name, f"{reason} (not banned)", success=True
                     )
                     return True
             except nextcord.NotFound:
                 logger.info(f"User {user_id} not banned in {guild.name}")
                 await self.send_ban_webhook_notification(
                     "unban", user_id, target_username, moderator_id, moderator_username,
-                    guild.name, f"{reason} (not banned)", success=True
+                    server_display_name, f"{reason} (not banned)", success=True
                 )
                 return True
             
@@ -845,7 +853,7 @@ class BadBotAutoMod:
             # Send success webhook
             await self.send_ban_webhook_notification(
                 "unban", user_id, target_username, moderator_id, moderator_username,
-                guild.name, reason, success=True
+                server_display_name, reason, success=True
             )
             
             return True
@@ -854,21 +862,21 @@ class BadBotAutoMod:
             logger.error(f"No permission to unban in {guild.name}")
             await self.send_ban_webhook_notification(
                 "unban", user_id, target_username, moderator_id, moderator_username,
-                guild.name, f"{reason} (no permission)", success=False
+                server_display_name, f"{reason} (no permission)", success=False
             )
             return False
         except nextcord.HTTPException as e:
             logger.error(f"HTTP error unbanning user {user_id} from {guild.name}: {e}")
             await self.send_ban_webhook_notification(
                 "unban", user_id, target_username, moderator_id, moderator_username,
-                guild.name, f"{reason} (HTTP error: {e})", success=False
+                server_display_name, f"{reason} (HTTP error: {e})", success=False
             )
             return False
         except Exception as e:
             logger.error(f"Unexpected error unbanning user {user_id} from {guild.name}: {e}")
             await self.send_ban_webhook_notification(
                 "unban", user_id, target_username, moderator_id, moderator_username,
-                guild.name, f"{reason} (error: {e})", success=False
+                server_display_name, f"{reason} (error: {e})", success=False
             )
             return False
 
@@ -1208,13 +1216,17 @@ class BadBotAutoMod:
             
             await ctx.send(f"⏳ Mass banning user {target_user_id} from all servers...")
             
+            # Get configured server name
+            server_config = self.servers.get(ctx.guild.id)
+            originating_server_name = server_config.guild_name if server_config else ctx.guild.name
+            
             # Execute mass ban
             ban_results = await self.mass_ban_user(
                 target_user_id, 
                 f"Mass ban by {ctx.author.display_name}: {notes}",
                 ctx.author.id,
                 ctx.author.display_name,
-                ctx.guild.name
+                originating_server_name
             )
             
             # Report results
@@ -1245,13 +1257,17 @@ class BadBotAutoMod:
             
             await ctx.send(f"⏳ Mass unbanning user {target_user_id} from all servers...")
             
+            # Get configured server name
+            server_config = self.servers.get(ctx.guild.id)
+            originating_server_name = server_config.guild_name if server_config else ctx.guild.name
+            
             # Execute mass unban
             unban_results = await self.mass_unban_user(
                 target_user_id, 
                 f"Mass unban by {ctx.author.display_name}: {notes}",
                 ctx.author.id,
                 ctx.author.display_name,
-                ctx.guild.name
+                originating_server_name
             )
             
             # Report results
@@ -1290,7 +1306,11 @@ class BadBotAutoMod:
                 await ctx.send("❌ You cannot ban an authorized user.")
                 return
             
-            await ctx.send(f"⏳ Banning user {target_user_id} from {ctx.guild.name}...")
+            # Get configured server name
+            server_config = self.servers.get(ctx.guild.id)
+            server_display_name = server_config.guild_name if server_config else ctx.guild.name
+            
+            await ctx.send(f"⏳ Banning user {target_user_id} from {server_display_name}...")
             
             # Execute single server ban
             success = await self.single_ban_user(
@@ -1302,9 +1322,9 @@ class BadBotAutoMod:
             )
             
             if success:
-                await ctx.send(f"✅ Successfully banned user {target_user_id} from {ctx.guild.name}.")
+                await ctx.send(f"✅ Successfully banned user {target_user_id} from {server_display_name}.")
             else:
-                await ctx.send(f"❌ Failed to ban user {target_user_id} from {ctx.guild.name}. Check logs for details.")
+                await ctx.send(f"❌ Failed to ban user {target_user_id} from {server_display_name}. Check logs for details.")
 
         @bot.command(name='unban')
         async def unban_command(ctx, user_id: str, *, notes: str = "No notes provided"):
@@ -1321,7 +1341,11 @@ class BadBotAutoMod:
                 await ctx.send("❌ Invalid user ID format. Please provide a valid Discord user ID.")
                 return
             
-            await ctx.send(f"⏳ Unbanning user {target_user_id} from {ctx.guild.name}...")
+            # Get configured server name
+            server_config = self.servers.get(ctx.guild.id)
+            server_display_name = server_config.guild_name if server_config else ctx.guild.name
+            
+            await ctx.send(f"⏳ Unbanning user {target_user_id} from {server_display_name}...")
             
             # Execute single server unban
             success = await self.single_unban_user(
@@ -1333,9 +1357,9 @@ class BadBotAutoMod:
             )
             
             if success:
-                await ctx.send(f"✅ Successfully unbanned user {target_user_id} from {ctx.guild.name}.")
+                await ctx.send(f"✅ Successfully unbanned user {target_user_id} from {server_display_name}.")
             else:
-                await ctx.send(f"❌ Failed to unban user {target_user_id} from {ctx.guild.name}. Check logs for details.")
+                await ctx.send(f"❌ Failed to unban user {target_user_id} from {server_display_name}. Check logs for details.")
         
         return bot
 
