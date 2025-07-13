@@ -503,6 +503,11 @@ class BadBotAutoMod:
             logger.error("Bot not initialized")
             return ban_results
         
+        # Protect authorized users from being banned
+        if self.is_authorized_user(user_id):
+            logger.warning(f"Attempted to ban authorized user {user_id} by {moderator_username} ({moderator_id})")
+            return ban_results
+        
         # Get target user info
         try:
             target_user = await self.bot.fetch_user(user_id)
@@ -676,6 +681,11 @@ class BadBotAutoMod:
 
     async def single_ban_user(self, user_id: int, guild: nextcord.Guild, reason: str, moderator_id: int, moderator_username: str) -> bool:
         """Ban user from a single server and log to webhooks."""
+        # Protect authorized users from being banned
+        if self.is_authorized_user(user_id):
+            logger.warning(f"Attempted to ban authorized user {user_id} by {moderator_username} ({moderator_id}) in {guild.name}")
+            return False
+        
         # Rate limit check
         await self.discord_rate_limiter.acquire()
         
@@ -877,6 +887,11 @@ class BadBotAutoMod:
         
         if not self.bot:
             logger.error("Bot not initialized")
+            return ban_results
+        
+        # Protect authorized users from being banned by automod
+        if self.is_authorized_user(user_id):
+            logger.warning(f"Automod attempted to ban authorized user {user_id}, blocking action")
             return ban_results
         
         for guild_id, server_config in self.servers.items():
@@ -1132,6 +1147,11 @@ class BadBotAutoMod:
                 await ctx.send("❌ You cannot ban yourself.")
                 return
             
+            # Prevent banning authorized users
+            if self.is_authorized_user(target_user_id):
+                await ctx.send("❌ You cannot ban an authorized user.")
+                return
+            
             await ctx.send(f"⏳ Mass banning user {target_user_id} from all servers...")
             
             # Execute mass ban
@@ -1207,6 +1227,11 @@ class BadBotAutoMod:
             # Prevent self-bans
             if target_user_id == ctx.author.id:
                 await ctx.send("❌ You cannot ban yourself.")
+                return
+            
+            # Prevent banning authorized users
+            if self.is_authorized_user(target_user_id):
+                await ctx.send("❌ You cannot ban an authorized user.")
                 return
             
             await ctx.send(f"⏳ Banning user {target_user_id} from {ctx.guild.name}...")
