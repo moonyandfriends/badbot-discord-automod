@@ -925,8 +925,11 @@ class BadBotAutoMod:
             "Discord invite URLs, link shorteners, offers for Web3.0 jobs, "
             "or messages that appear to recruit for jobs are also likely to be scams. "
             "Additionally, messages from people promising easy earnings or investment opportunities "
-            "are highly suspicious. If the content contains any of these elements or seems to fit "
-            "the pattern of scam behavior, consider it a scam."
+            "are highly suspicious. However, people looking for assistance, support, and help "
+            "are typically NOT scammers - genuine users often ask questions, request guidance, "
+            "or seek troubleshooting help. If the content contains any scam elements or seems to fit "
+            "the pattern of scam behavior, consider it a scam. Otherwise, if it appears to be a "
+            "legitimate request for help or support, it should NOT be considered a scam."
         )
 
         user_prompt = (
