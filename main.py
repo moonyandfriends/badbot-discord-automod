@@ -197,6 +197,9 @@ class BadBotAutoMod:
         # Graceful shutdown
         self.shutdown_event = asyncio.Event()
         
+        # Domain whitelist - trusted domains that won't trigger ChatGPT analysis
+        self.whitelisted_domains: Set[str] = set()
+        
     def validate_webhook_url(self, url: str) -> bool:
         """Validate that a webhook URL is properly formatted."""
         try:
@@ -319,6 +322,16 @@ class BadBotAutoMod:
                 logger.warning("No valid authorized users found. Ban/unban commands will be disabled.")
         else:
             logger.warning("badbot_authorized_users environment variable not set. Ban/unban commands will be disabled.")
+        
+        # Load domain whitelist
+        whitelist_env = os.environ.get("badbot_domain_whitelist")
+        if whitelist_env:
+            # Parse comma-separated domains
+            domains = [domain.strip().lower() for domain in whitelist_env.split(',') if domain.strip()]
+            self.whitelisted_domains = set(domains)
+            logger.info(f"Loaded {len(self.whitelisted_domains)} whitelisted domains")
+        else:
+            logger.info("No domain whitelist configured. All messages will be analyzed by ChatGPT.")
         
     def load_credentials(self) -> str:
         """Load Discord token and OpenAI key from environment variables."""
@@ -446,6 +459,22 @@ class BadBotAutoMod:
     def is_authorized_user(self, user_id: int) -> bool:
         """Check if a user is authorized to use ban/unban commands."""
         return user_id in self.authorized_users
+
+    def contains_whitelisted_domain(self, content: str) -> bool:
+        """Check if the message content contains any whitelisted domains."""
+        if not self.whitelisted_domains:
+            return False
+        
+        # Convert content to lowercase for case-insensitive matching
+        content_lower = content.lower()
+        
+        # Check if any whitelisted domain is present in the content
+        for domain in self.whitelisted_domains:
+            if domain in content_lower:
+                logger.info(f"Found whitelisted domain '{domain}' in message content")
+                return True
+        
+        return False
 
     async def send_ban_webhook_notification(self, action: str, target_user_id: int, target_username: str, 
                                           moderator_id: int, moderator_username: str, guild_name: str, 
@@ -1121,7 +1150,14 @@ class BadBotAutoMod:
                 logger.info(f"User {username} ({user_id}) has {user_post_count} posts across servers. Skipping ChatGPT analysis - likely not a scammer.")
                 return
             
-            logger.info(f"User {username} ({user_id}) has only {user_post_count} posts. Proceeding with ChatGPT analysis.")
+            logger.info(f"User {username} ({user_id}) has only {user_post_count} posts. Proceeding with domain whitelist check.")
+            
+            # Check if message contains whitelisted domains
+            if self.contains_whitelisted_domain(blocked_content):
+                logger.info(f"Message from {username} ({user_id}) contains whitelisted domain. Skipping ChatGPT analysis.")
+                return
+            
+            logger.info(f"No whitelisted domains found in message from {username} ({user_id}). Proceeding with ChatGPT analysis.")
             
             # Check with ChatGPT
             is_scam = await self.check_gpt_for_scam(blocked_content)
